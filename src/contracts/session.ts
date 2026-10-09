@@ -1,0 +1,53 @@
+import type { SkillSnapshot } from "./skill";
+
+/** pi 会话文件是历史权威；此处只保存关联信息。 */
+export interface SessionReference {
+  sessionId: string;
+  sessionFile: string;
+  skills: SkillSnapshot[];
+  readOnly: boolean;
+  /** 空名称显示“新会话”；首轮完成后生成标题。 */
+  name?: string;
+}
+
+export type MessagePart =
+  | { type: "text"; text: string }
+  | ImageInput
+  | { type: "thinking"; text: string }
+  | { type: "tool"; toolCallId: string };
+
+/** pi RPC 图片内容；data 为无 data URL 前缀的 Base64。 */
+export interface ImageInput { type: "image"; data: string; mimeType: string }
+
+/** 尚未发送的本地附件；文本文件只读取 UTF-8 正文。 */
+export type PromptAttachment = { id: string; name: string; size: number } & (
+  | { type: "image"; data: string; mimeType: string }
+  | { type: "text"; text: string }
+);
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  parts: MessagePart[];
+  final: boolean;
+  error?: string;
+  timestamp?: number;
+  stopReason?: string;
+}
+
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+/** pi 当前窗口估算，不是整个会话累计计费 token。 */
+export interface ContextUsage {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+}
+
+export interface ToolRun {
+  toolCallId: string;
+  name: string;
+  args: unknown;
+  output?: unknown;
+  status: "waiting" | "running" | "succeeded" | "failed" | "cancelled";
+}

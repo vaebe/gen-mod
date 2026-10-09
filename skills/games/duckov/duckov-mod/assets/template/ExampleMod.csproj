@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>ExampleMod</AssemblyName>
+    <RootNamespace>ExampleMod</RootNamespace>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultItems>true</EnableDefaultItems>
+  </PropertyGroup>
+  <Target Name="RequireReferenceDirectory" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(ReferenceDirectory)' == ''" Text="需要独立的 ReferenceDirectory 参考程序集目录。" />
+  </Target>
+  <ItemGroup>
+    <Reference Include="$(ReferenceDirectory)/*.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,6 @@
+<script setup lang="ts">
+import type { ArtifactVersion } from "@/contracts/mod";
+defineProps<{ versions: ArtifactVersion[]; selected?: string; latest?: string; installed: string[] }>();
+defineEmits<{ select: [id: string] }>();
+</script>
+<template><div class="space-y-2"><p v-if="!versions.length" class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">尚无成功交付版本。生成完成并通过文件校验后会显示在这里。</p><button v-for="version in [...versions].reverse()" :key="version.versionId" class="w-full rounded-lg border p-4 text-left hover:bg-accent/50" :class="[installed.includes(version.versionId) && 'border-emerald-500/50 bg-emerald-500/5', selected === version.versionId && 'ring-1 ring-primary']" @click="$emit('select', version.versionId)"><div class="flex items-center justify-between gap-3"><span class="font-mono text-sm">{{ version.versionId.slice(0, 8) }}</span><div class="flex items-center gap-2"><span v-if="installed.includes(version.versionId)" class="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-400">已安装</span><span v-if="latest === version.versionId" class="text-xs text-muted-foreground">最新产物</span></div></div><p class="mt-2 text-xs text-muted-foreground">{{ new Date(version.createdAt).toLocaleString() }} · {{ version.files.length }} 个文件</p></button></div></template>

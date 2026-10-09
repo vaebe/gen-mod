@@ -1,0 +1,8 @@
+{
+  "name": "@gen-mod/pi-runtime",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "files": ["extensions", "helpers", "runtime-lock.json"],
+  "dependencies": { "@earendil-works/pi-coding-agent": "1.1.0", "typebox": "1.3.27" }
+}

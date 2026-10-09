@@ -1,0 +1,91 @@
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, cpSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, relative } from "node:path";
+import { spawnSync } from "node:child_process";
+import { materialize } from "./materialize-runtime.mjs";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+const lock = JSON.parse(readFileSync(join(root, "runtime/runtime-lock.json"), "utf8"));
+const resources = join(root, "runtime/resources");
+const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+function run(program, args) {
+  const result = spawnSync(program, args, { cwd: root, stdio: "inherit", windowsHide: true });
+  if (result.error || result.status !== 0) {
+    throw new Error(`运行时准备命令失败：${program} (${result.status ?? result.error?.message})`);
+  }
+}
+
+if (process.platform !== lock.node.platform || process.arch !== lock.node.arch) {
+  throw new Error(`当前锁文件仅支持 ${lock.node.platform}/${lock.node.arch}`);
+}
+mkdirSync(resources, { recursive: true });
+const archive = join(resources, "node.zip");
+if (!existsSync(archive)) {
+  console.log(`下载固定 Node ${lock.node.version}…`);
+  const response = await fetch(lock.node.url, { signal: AbortSignal.timeout(120_000) });
+  if (!response.ok) { throw new Error(`Node 下载失败：HTTP ${response.status}`); }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (hash(bytes) !== lock.node.sha256) { throw new Error("Node 下载校验失败"); }
+  writeFileSync(`${archive}.tmp`, bytes);
+  renameSync(`${archive}.tmp`, archive);
+}
+if (hash(readFileSync(archive)) !== lock.node.sha256) { throw new Error("本地 Node ZIP 校验失败"); }
+const node = join(resources, lock.node.directory, "node.exe");
+if (!existsSync(node)) {
+  // 文件路径只作为参数，不插入 PowerShell 代码；脚本通过位置参数获取。
+  const expandScript = join(resources, "expand-node.ps1");
+  writeFileSync(expandScript, "param([string]$Archive,[string]$Destination)\n$ErrorActionPreference='Stop'\nExpand-Archive -LiteralPath $Archive -DestinationPath $Destination\n");
+  run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", expandScript, archive, resources]);
+}
+const deploy = join(resources, `pi-v${lock.pi.version}`);
+const deploymentMarker = join(deploy, ".deployment-complete");
+if (!existsSync(deploymentMarker)) {
+  if (existsSync(deploy)) {
+    // 只移动本脚本在固定 resources 目录内生成的未完成部署，保留失败现场。
+    const previous = join(root, "work", `pi-incomplete-${Date.now()}`);
+    if (!relative(resources, deploy).startsWith("..") && !relative(join(root, "work"), previous).startsWith("..")) {
+      mkdirSync(join(root, "work"), { recursive: true });
+      renameSync(deploy, previous);
+    } else { throw new Error("部署恢复路径越界"); }
+  }
+  // 使用项目固定的 pnpm，不运行依赖生命周期脚本，不引入第二份锁文件。
+  run(process.execPath, [join(root, "node_modules/pnpm/bin/pnpm.cjs"), "--filter", "@gen-mod/pi-runtime", "deploy", "--prod", "--legacy", "--ignore-scripts", deploy]);
+  writeFileSync(deploymentMarker, lock.pi.version);
+}
+const installed = JSON.parse(readFileSync(join(deploy, "node_modules", lock.pi.package, "package.json"), "utf8"));
+if (installed.version !== lock.pi.version) { throw new Error("部署的 pi 版本与锁文件不一致"); }
+const portable = join(resources, `pi-portable-v${lock.pi.version}`);
+if (!existsSync(join(portable, ".deployment-complete"))) {
+  console.log("实体化 pi 运行时依赖闭包…");
+  const count = materialize(deploy, portable);
+  writeFileSync(join(portable, ".deployment-complete"), lock.pi.version);
+  console.log(`复制 ${count} 个运行时依赖目录（不含页面依赖闭包）`);
+}
+if (existsSync(join(root, "runtime/extensions"))) {
+  cpSync(join(root, "runtime/extensions"), join(portable, "extensions"), { recursive: true });
+}
+cpSync(join(root, "runtime/helpers"), join(portable, "helpers"), { recursive: true });
+
+// 记录可审计的资源哈希，发布前检查完整性；不复制项目 env 或用户资料。
+const files = [];
+const visited = new Set();
+function inventory(directory, output = files, base = resources) {
+  const canonical = realpathSync(directory);
+  if (visited.has(canonical)) { return; }
+  visited.add(canonical);
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.name === "node.zip" || entry.name === "resource-manifest.json" || entry.name === ".bin" || !existsSync(path)) { continue; }
+    const info = statSync(path);
+    if (info.isDirectory()) { inventory(path, output, base); }
+    else { output.push({ path: relative(base, path).replaceAll("\\", "/"), size: info.size, sha256: hash(readFileSync(path)) }); }
+  }
+}
+inventory(join(resources, lock.node.directory));
+inventory(portable);
+const skillFiles = [];
+inventory(join(root, "skills"), skillFiles, join(root, "skills"));
+writeFileSync(join(resources, "resource-manifest.json"), JSON.stringify({ pi: lock.pi.version, node: lock.node.version, files, skills: skillFiles }, null, 2));
+console.log(`已准备 Node ${lock.node.version} / pi ${lock.pi.version}，${files.length} 个运行时文件、${skillFiles.length} 个 skills 文件`);
