@@ -24,6 +24,7 @@ struct Process {
     app: tauri::AppHandle,
     pending_title: Option<String>,
     waiting_leases: Vec<String>,
+    command_baselines: std::collections::BTreeMap<String, Vec<u32>>,
     steering: Vec<Value>,
     steering_queue: Vec<String>,
     consumed_inputs: std::collections::VecDeque<String>,
@@ -57,12 +58,28 @@ fn emit(process: &Process, generation: u64, kind: &str, record: Value) {
         ("record", "compaction_start") => Some("开始压缩上下文".into()),
         ("record", "compaction_end") => Some("上下文压缩结束".into()),
         ("record", "tool_execution_start") => Some(format!("开始工具 {} · {}", record["toolName"].as_str().unwrap_or("未知"), record["args"])),
-        ("record", "tool_execution_end") => Some(format!("工具 {} · {} · 命令日志 {}", record["toolName"].as_str().unwrap_or("未知"), if record["isError"] == true || record["result"]["details"]["status"] == "failed" { "失败，详情见任务工具日志" } else { "完成" }, record["result"]["details"]["logPath"].as_str().unwrap_or("见本轮 tool-results"))),
+        ("record", "tool_execution_end") => Some(format!("工具 {} · {} · toolCallId {} · 退出码 {} · 命令日志 {}{}", record["toolName"].as_str().unwrap_or("未知"), if record["isError"] == true || record["result"]["details"]["status"] == "failed" { "失败" } else { "完成" }, record["toolCallId"].as_str().unwrap_or("未知"), record["result"]["details"]["exitCode"], record["result"]["details"]["logPath"].as_str().unwrap_or("见本轮 tool-results"), if record["isError"] == true { format!(" · 错误 {}",record["result"]["content"]) } else { String::new() })),
         ("artifact", "artifact_registered") => Some(format!("已登记交付版本 {}", record["versionId"].as_str().unwrap_or("未知"))),
         ("record", "response") if record["command"] == "get_state" => Some(format!("会话 {} · 历史 {} 条消息 · {}", record["data"]["sessionId"].as_str().unwrap_or("未知"), record["data"]["messageCount"], record["data"]["sessionFile"].as_str().unwrap_or("未生成历史文件"))),
         _ => None,
     };
     if let Some(message) = message {
+        // 保存可关联的完整事件；不记录模型思考、提示词或环境变量。
+        if let Some(task) = &process.task {
+            if matches!(kind,"diagnostic"|"exit") || matches!(record["type"].as_str(),Some("tool_execution_start"|"tool_execution_end"|"task_started")) {
+                let saved = (|| -> Result<(),String> {
+                    let directory = paths::project_dir(&process.app,&process.mod_id)?.join("logs").join(&task.context.task_id);
+                    paths::reject_redirect(&directory)?;
+                    let path = directory.join("runtime-events.jsonl");
+                    if path.exists() { paths::reject_redirect(&path)?; }
+                    let mut file = fs::OpenOptions::new().append(true).create(true).open(path).map_err(|e|e.to_string())?;
+                    writeln!(file,"{}",json!({"timestamp":mods::now()?,"generation":generation,"taskId":task.context.task_id,"kind":kind,"record":record})).map_err(|e|e.to_string())
+                })();
+                if let Err(error) = saved {
+                    let _ = process.channel.send(Envelope {mod_id:process.mod_id.clone(),session_id:process.session_id.clone(),task_id:Some(task.context.task_id.clone()),generation,kind:"diagnostic".into(),record:json!({"type":"log_error","message":format!("任务事件日志保存失败：{error}")})});
+                }
+            }
+        }
         let entry = super::logs::RuntimeLogEntry { timestamp: mods::now().unwrap_or_default(), generation, task_id: process.task.as_ref().map(|t| t.context.task_id.clone()), message: message.chars().take(4000).collect() };
         let saved = crate::storage::repository::log(&process.app, &process.mod_id, &process.session_id, &entry);
         if let Err(error) = saved {
@@ -73,13 +90,38 @@ fn emit(process: &Process, generation: u64, kind: &str, record: Value) {
 }
 
 /// 命令 leader 退出不代表后代已结束；等待时释放槽锁，停止仍可进入。
-fn wait_command_descendants(slot: &SlotState, generation: u64) -> Result<(),String> {
+fn wait_command_descendants(slot: &SlotState, generation: u64, request: &Value) -> Result<(),String> {
+    let started = std::time::Instant::now();
+    let mut previous = Vec::new();
+    let mut last_log = started;
+    let mut cleanup_started = false;
+    let lease_id = request["leaseId"].as_str().ok_or("命令缺少租约 ID")?;
     loop {
         {
             let inner=slot.0.lock().map_err(|_|"会话运行锁异常")?;
             if inner.generation!=generation { return Err("任务已替换".into()); }
             let process=inner.process.as_ref().ok_or("任务已停止")?;
-            if process._job.as_ref().ok_or("进程 Job 缺失")?.active_processes()?<=1 { return Ok(()); }
+            let baseline = process.command_baselines.get(lease_id).ok_or("命令缺少启动前 Job 进程基线，不能释放租约")?;
+            let job = process._job.as_ref().ok_or("进程 Job 缺失")?;
+            let active = job.process_ids()?;
+            let remaining: Vec<u32> = active.iter().copied().filter(|pid| !baseline.contains(pid)).collect();
+            if remaining.is_empty() || remaining != previous || last_log.elapsed() >= std::time::Duration::from_secs(1) {
+                emit(process,generation,"diagnostic",json!({"type":"command_descendants","message":format!("命令后代等待 · leaseId {lease_id} · toolCallId {} · 基线 {baseline:?} · 活动 {active:?} · 待退出 {remaining:?} · {}ms",request["toolCallId"],started.elapsed().as_millis()),"leaseId":lease_id,"toolCallId":request["toolCallId"],"baselinePids":baseline,"activePids":active,"remainingPids":remaining,"remainingProcesses":job.describe_processes(&remaining),"elapsedMs":started.elapsed().as_millis()}));
+                previous = remaining.clone(); last_log = std::time::Instant::now();
+            }
+            if remaining.is_empty() {
+                if cleanup_started { emit(process,generation,"diagnostic",json!({"type":"command_cleanup_complete","message":format!("本次命令后代已全部退出，保留 pi 并释放租约 · leaseId {lease_id}"),"leaseId":lease_id,"toolCallId":request["toolCallId"]})); }
+                return Ok(());
+            }
+            if started.elapsed() >= std::time::Duration::from_secs(15) { return Err(format!("本次命令后代回收未确认，剩余 PID {remaining:?}，耗时 {}ms；必须停止运行时才能清理租约",started.elapsed().as_millis())); }
+            if started.elapsed() >= std::time::Duration::from_secs(10) {
+                if !cleanup_started {
+                    emit(process,generation,"diagnostic",json!({"type":"command_cleanup_started","message":format!("命令已退出，回收本次新增后代 {remaining:?}，保留 pi · leaseId {lease_id}"),"leaseId":lease_id,"toolCallId":request["toolCallId"],"processes":job.describe_processes(&remaining)}));
+                    cleanup_started = true;
+                }
+                let terminated = job.terminate_descendants(baseline)?;
+                if !terminated.is_empty() { emit(process,generation,"diagnostic",json!({"type":"command_cleanup_requested","message":format!("已请求终止命令后代 {terminated:?}，继续确认退出 · leaseId {lease_id}"),"leaseId":lease_id,"toolCallId":request["toolCallId"],"terminatedPids":terminated})); }
+            }
         }
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
@@ -104,6 +146,7 @@ fn emit_entry_confirmation(channel: &Channel<Envelope>, mod_id: String, session_
 fn continue_worker_cleanup(process: &mut Process, request: &Value) {
     if request["action"] != "acquire" {
         if let Some(id) = request["leaseId"].as_str() { process.waiting_leases.retain(|v|v!=id); }
+        if let Some(id) = request["leaseId"].as_str() { process.command_baselines.remove(id); }
     }
 }
 
@@ -424,7 +467,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     let stdin = child.stdin.take().ok_or("pi stdin 未建立")?;
     let stdout = child.stdout.take().ok_or("pi stdout 未建立")?;
     let stderr = child.stderr.take().ok_or("pi stderr 未建立")?;
-    inner.process = Some(Process { child, stdin, _job: Some(job), channel, mod_id: mod_id.into(), session_id: session_id.into(), task, active: false, compacting: false, prompt_id: None, tool_inputs: std::collections::BTreeMap::new(), app: app.clone(), pending_title: None, waiting_leases: vec![], steering: vec![], steering_queue: vec![], consumed_inputs: Default::default(), confirming_input: None, stopping: false });
+    inner.process = Some(Process { child, stdin, _job: Some(job), channel, mod_id: mod_id.into(), session_id: session_id.into(), task, active: false, compacting: false, prompt_id: None, tool_inputs: std::collections::BTreeMap::new(), app: app.clone(), pending_title: None, waiting_leases: vec![], command_baselines: Default::default(), steering: vec![], steering_queue: vec![], consumed_inputs: Default::default(), confirming_input: None, stopping: false });
     if let Some(process) = &inner.process {
         emit(process, generation, "diagnostic", json!({ "type": "runtime_started", "message": format!("启动 pi · 会话 {session_id} · 工作目录 {}", source.display()) }));
         if let Some(task) = &process.task { emit(process, generation, "task", json!({ "type": "task_started", "context": task.context })); }
@@ -462,6 +505,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
                                     continue;
                                 }
                                 let action = request["action"].as_str().unwrap_or("");
+                                emit(process,generation,"diagnostic",json!({"type":"workspace_request","message":format!("工作区请求 · action {action} · operation {} · leaseId {} · toolCallId {}",request["operation"],request["leaseId"],request["toolCallId"]),"request":request}));
                                 if action == "acquire" {
                                     if !process.tool_inputs.contains_key(request["toolCallId"].as_str().unwrap_or("")) {
                                         let _ = writeln!(process.stdin,"{}",json!({"type":"extension_ui_response","id":reply_id,"value":json!({"error":"工作区请求没有实际工具调用"}).to_string()}));
@@ -474,18 +518,51 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
                                 let worker_app = app_stdout.clone();
                                 let worker_slot = shared_stdout.clone();
                                 std::thread::spawn(move || {
+                                    let started = std::time::Instant::now();
                                     let workspaces = worker_app.state::<super::workspace::Workspaces>();
                                     if request["action"] == "terminate" {
                                         if let Ok(mut inner) = worker_slot.0.lock() {
-                                            if inner.generation==generation { let _ = stop(&worker_app,&mut inner); }
+                                            if inner.generation==generation {
+                                                if let Some(process) = &inner.process { emit(process,generation,"diagnostic",json!({"type":"command_cleanup","message":format!("命令后代回收未确认，停止运行时 · leaseId {} · toolCallId {}",request["leaseId"],request["toolCallId"])})); }
+                                                if let Err(error) = stop(&worker_app,&mut inner) {
+                                                    if let Some(process) = &inner.process { emit(process,generation,"diagnostic",json!({"type":"command_cleanup_error","message":format!("运行时回收失败，租约保留：{error}")})); }
+                                                }
+                                            }
                                         }
                                         return;
                                     }
                                     let result = match request["action"].as_str() {
-                                        Some("acquire") => workspaces.acquire(&worker_app,&context,&request),
+                                        Some("acquire") => workspaces.acquire(&worker_app,&context,&request).and_then(|value| {
+                                            if !matches!(request["operation"].as_str(),Some("run_command"|"prepare_delivery")) { return Ok(value); }
+                                            // 独占租约取得后、回传给扩展前取基线，此时命令尚未启动。
+                                            let captured = (|| -> Result<Value,String> {
+                                                let mut inner = worker_slot.0.lock().map_err(|_|"会话运行锁异常")?;
+                                                if inner.generation != generation { return Err("任务已替换".into()); }
+                                                let process = inner.process.as_mut().ok_or("任务已停止")?;
+                                                let ids = process._job.as_ref().ok_or("进程 Job 缺失")?.process_ids()?;
+                                                let lease_id = request["leaseId"].as_str().ok_or("命令租约缺少 ID")?;
+                                                emit(process,generation,"diagnostic",json!({"type":"command_baseline","message":format!("命令启动前 Job 基线 · leaseId {lease_id} · toolCallId {} · PID {ids:?}",request["toolCallId"]),"leaseId":lease_id,"toolCallId":request["toolCallId"],"processIds":ids}));
+                                                process.command_baselines.insert(lease_id.into(),ids);
+                                                Ok(value)
+                                            })();
+                                            if captured.is_err() { let _ = workspaces.cancel(&context.mod_id,request["leaseId"].as_str().unwrap_or("")); }
+                                            captured
+                                        }),
                                         Some("release") => {
-                                            let completed = if matches!(request["operation"].as_str(),Some("run_command"|"prepare_delivery")) { wait_command_descendants(&worker_slot,generation) } else { Ok(()) };
-                                            completed.and_then(|_|workspaces.release(&worker_app,&context,&request))
+                                            let completed = if matches!(request["operation"].as_str(),Some("run_command"|"prepare_delivery")) { wait_command_descendants(&worker_slot,generation,&request) } else { Ok(()) };
+                                            if let Err(error) = completed {
+                                                // 不能把等待超时当成命令完成；先确认 Job 已终止，再由 stop 清理租约。
+                                                if let Ok(mut inner) = worker_slot.0.lock() {
+                                                    if inner.generation == generation {
+                                                        if let Some(process) = &inner.process { emit(process,generation,"diagnostic",json!({"type":"command_cleanup","message":error,"leaseId":request["leaseId"],"toolCallId":request["toolCallId"]})); }
+                                                        if let Err(cleanup_error) = stop_inner(&worker_app,&mut inner,true) {
+                                                            if let Some(process) = &inner.process { emit(process,generation,"diagnostic",json!({"type":"command_cleanup_error","message":format!("运行时回收失败，租约保留：{cleanup_error}")})); }
+                                                        }
+                                                    }
+                                                }
+                                                return;
+                                            }
+                                            workspaces.release(&worker_app,&context,&request)
                                         },
                                         Some("cancel") => workspaces.cancel(&context.mod_id,request["leaseId"].as_str().unwrap_or("")).map(|_|json!({})),
                                         _ => Err("未知工作区请求".into())
@@ -494,8 +571,10 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
                                         if inner.generation == generation {
                                             if let Some(process) = inner.process.as_mut() {
                                                 let value = result.unwrap_or_else(|error|json!({"error":error}));
-                                                let _ = writeln!(process.stdin,"{}",json!({"type":"extension_ui_response","id":reply_id,"value":value.to_string()}));
-                                                let _ = process.stdin.flush();
+                                                emit(process,generation,"diagnostic",json!({"type":"workspace_response","message":format!("工作区响应 · action {} · operation {} · leaseId {} · toolCallId {} · {}ms · {value}",request["action"],request["operation"],request["leaseId"],request["toolCallId"],started.elapsed().as_millis()),"request":request,"result":value,"elapsedMs":started.elapsed().as_millis()}));
+                                                if let Err(error) = writeln!(process.stdin,"{}",json!({"type":"extension_ui_response","id":reply_id,"value":value.to_string()})).and_then(|_|process.stdin.flush()) {
+                                                    emit(process,generation,"diagnostic",json!({"type":"workspace_response_error","message":format!("工作区响应发送失败：{error} · leaseId {} · toolCallId {}",request["leaseId"],request["toolCallId"])}));
+                                                }
                                                 emit(process,generation,"task",json!({"type":"workspace_ready"}));
                                                 continue_worker_cleanup(process,&request);
                                                 drop(inner);
@@ -531,7 +610,13 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
             let message = if secret.is_empty() { line } else { line.replace(&secret, "[redacted]") };
             let inner = match shared_stderr.0.lock() { Ok(value) => value, Err(_) => break };
             if inner.generation != generation { break; }
-            if let Some(process) = &inner.process { emit(process, generation, "diagnostic", json!({ "type": "stderr", "message": message })); }
+            if let Some(process) = &inner.process {
+                let diagnostic = message.strip_prefix("GEN_MOD_DIAGNOSTIC ").and_then(|raw|serde_json::from_str::<Value>(raw).ok()).filter(|v|v["type"]=="command_diagnostic");
+                if let Some(mut record) = diagnostic {
+                    record["message"] = format!("运行时诊断 · {}",record).into();
+                    emit(process,generation,"diagnostic",record);
+                } else { emit(process, generation, "diagnostic", json!({ "type": "stderr", "message": message })); }
+            }
         }
     });
     Ok(generation)

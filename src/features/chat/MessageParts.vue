@@ -29,7 +29,7 @@ async function interceptLink(event: MouseEvent, modId: string): Promise<void> {
 <template>
   <div @click.capture="interceptLink($event, modId)">
     <template v-for="(part, index) in message.parts" :key="`${message.id}-${index}`">
-      <p v-if="part.type === 'text' && message.role === 'user'" class="whitespace-pre-wrap text-sm leading-7">{{ part.text }}</p>
+      <p v-if="part.type === 'text' && message.role === 'user'" class="whitespace-pre-wrap text-sm leading-6">{{ part.text }}</p>
       <MarkdownRender v-else-if="part.type === 'text'" class="chat-markdown" mode="chat" :content="part.text" :final="message.final" :custom-markdown-it="markdown" :custom-html-tags="[]" :render-code-blocks-as-pre="true" :show-tooltips="false" />
       <ToolActivity v-else-if="part.type === 'tool' && tools[part.toolCallId]" :tool="tools[part.toolCallId]!" />
     </template>

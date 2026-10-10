@@ -5,11 +5,18 @@ import { access, mkdir, open, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export interface TaskContext { taskId: string; modId: string; sessionId: string; generation: number; sourceDirectory: string; stagingId: string; stagingDirectory: string; createdAt: string }
-export interface Receipt { sourceRevision: number; taskId: string; commandId: string; toolCallId: string; exitCode: number | null; status: "succeeded" | "failed" | "cancelled"; logPath: string; program: string; args: string[] }
+export interface Receipt { sourceRevision: number; taskId: string; commandId: string; toolCallId: string; exitCode: number | null; status: "succeeded" | "failed" | "cancelled"; logPath: string; program: string; args: string[]; pid?: number; startedAt: string; durationMs: number; outputTail: string; startupError?: string }
 export function context(): TaskContext {
   const raw = process.env.GEN_MOD_TASK_CONTEXT;
   if (!raw) { throw new Error("此连接没有原生任务上下文，不能执行命令或交付"); }
   return JSON.parse(raw) as TaskContext;
+}
+/** stderr 独立于工具回执，协调失败时原生仍可保存命令已执行的证据。 */
+export function runtimeDiagnostic(event: string, fields: Record<string, unknown>): void {
+  const task = context();
+  const raw = JSON.stringify({ type: "command_diagnostic", event, timestamp: new Date().toISOString(), taskId: task.taskId, ...fields });
+  const secret = process.env.STEPFUN_API_KEY;
+  process.stderr.write(`GEN_MOD_DIAGNOSTIC ${secret ? raw.replaceAll(secret, "[redacted]") : raw}\n`);
 }
 export async function contained(root: string, path: string): Promise<string> {
   const base = await realpath(root);
@@ -55,6 +62,8 @@ export async function runCommand(toolCallId: string, program: string, args: stri
   const logPath = resolve(task.stagingDirectory, "../../commands", `${commandId}.log`);
   await mkdir(dirname(logPath), { recursive: true });
   const log = await open(logPath, "wx");
+  const startedAt = new Date().toISOString();
+  const started = performance.now();
   const secret = process.env.STEPFUN_API_KEY ?? "";
   const environment = { ...process.env };
   delete environment.STEPFUN_API_KEY;
@@ -63,9 +72,14 @@ export async function runCommand(toolCallId: string, program: string, args: stri
   const pathKey = Object.keys(environment).find(key => key.toLowerCase() === "path") ?? "PATH";
   environment[pathKey] = [...new Set([available.shell, available.dotnet].filter((path): path is string => !!path).map(dirname)), environment[pathKey] ?? ""].join(delimiter);
   const redact = (value: string) => secret ? value.replaceAll(secret, "[redacted]") : value;
+  const metadata = { commandId, toolCallId, leaseId: lease.leaseId, program, args, cwd: directory, logPath, startedAt };
+  await log.write(`[command] ${redact(JSON.stringify(metadata))}\n`);
+  runtimeDiagnostic("command_start", metadata);
   const child = spawn(program, args, { cwd: directory, env: environment, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   let cancelled = signal?.aborted ?? false;
   let output = Promise.resolve();
+  let outputTail = "";
+  const remember = (value: string) => { outputTail = (outputTail + value).slice(-16_384); };
   // 按流保存全文；相邻分片合并后脱敏，避免 Key 跨 chunk 被写入日志。
   function capture(stream: NodeJS.ReadableStream, label: string): void {
     let tail = "";
@@ -79,16 +93,18 @@ export async function runCommand(toolCallId: string, program: string, args: stri
         if (crossing >= 0 && crossing + secret.length > boundary) { boundary = crossing; }
       }
       const safe = redact(combined.slice(0, boundary));
+      remember(safe);
       tail = combined.slice(boundary);
       output = output.then(async () => { await log.write(`[${label}] ${safe}`); });
     });
-    stream.on("end", () => { const safe = redact(tail); output = output.then(async () => { await log.write(safe); }); });
+    stream.on("end", () => { const safe = redact(tail); remember(safe); output = output.then(async () => { await log.write(safe); }); });
   }
   if (child.stdout) { capture(child.stdout, "stdout"); }
   if (child.stderr) { capture(child.stderr, "stderr"); }
   let descendants: Promise<void> | undefined;
   const cancel = () => {
     cancelled = true;
+    runtimeDiagnostic("command_cancel", { ...metadata, pid: child.pid, elapsedMs: Math.round(performance.now() - started) });
     if (process.platform === "win32" && child.pid) {
       const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
       descendants = new Promise<void>((done,reject) => { killer.once("error",reject); killer.once("close",code => code === 0 ? done() : reject(new Error("命令后代回收未确认，必须停止运行时"))); });
@@ -99,12 +115,25 @@ export async function runCommand(toolCallId: string, program: string, args: stri
   if (cancelled) { cancel(); }
   let exitCode: number | null = null;
   let startupError: Error | undefined;
+  let commandError: string | undefined;
+  let exitSignal: string | null = null;
   try {
-    exitCode = await new Promise<number | null>((done) => { child.once("error", (error) => { startupError = error; }); child.once("close", done); });
+    exitCode = await new Promise<number | null>((done) => {
+      child.once("spawn", () => runtimeDiagnostic("command_spawn", { ...metadata, pid: child.pid }));
+      child.once("error", (error) => { startupError = error; });
+      child.once("close", (code, signal) => { exitSignal = signal; done(code); });
+    });
     if (descendants) { try { await descendants; } catch (cause) { lease.descendantsUnconfirmed = true; throw cause; } }
     await output;
-    if (startupError) { await log.write(redact(startupError.message)); }
-  } catch (cause) { await log.write(redact(String(cause))); }
-  finally { signal?.removeEventListener("abort", cancel); await log.close(); }
-  return { sourceRevision: lease.sourceRevision, taskId: task.taskId, commandId, toolCallId, exitCode, status: cancelled ? "cancelled" : exitCode === 0 ? "succeeded" : "failed", logPath, program, args };
+    if (startupError) { commandError = redact(startupError.message); remember(commandError); await log.write(commandError); }
+  } catch (cause) { commandError = redact(String(cause)); remember(commandError); await log.write(commandError); }
+  finally {
+    signal?.removeEventListener("abort", cancel);
+    const durationMs = Math.round(performance.now() - started);
+    const status = cancelled ? "cancelled" : exitCode === 0 && !commandError ? "succeeded" : "failed";
+    runtimeDiagnostic("command_exit", { ...metadata, pid: child.pid, exitCode, exitSignal, status, durationMs, error: commandError, outputTail });
+    try { await log.write(`\n[exit] ${JSON.stringify({ pid: child.pid, exitCode, exitSignal, status, durationMs, error: commandError })}\n`); }
+    finally { await log.close(); }
+  }
+  return { sourceRevision: lease.sourceRevision, taskId: task.taskId, commandId, toolCallId, exitCode, status: cancelled ? "cancelled" : exitCode === 0 && !commandError ? "succeeded" : "failed", logPath, program, args, pid: child.pid, startedAt, durationMs: Math.round(performance.now() - started), outputTail, startupError: startupError ? redact(startupError.message) : undefined };
 }

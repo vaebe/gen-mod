@@ -2,13 +2,20 @@ import type { ExtensionContext, ExtensionAPI, ToolDefinition } from "@earendil-w
 import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { relative, resolve, isAbsolute, sep } from "node:path";
-import { context } from "./commands.js";
+import { context, runtimeDiagnostic } from "./commands.js";
 
 export interface Lease { leaseId: string; sourceRevision: number; toolCallId: string; descendantsUnconfirmed?: boolean }
 async function request(ctx: ExtensionContext, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const started = performance.now();
+  runtimeDiagnostic("workspace_request", payload);
   const reply = await ctx.ui.input("gen-mod:workspace", JSON.stringify({ ...context(), ...payload }), { timeout: 30_000 });
-  if (!reply) { throw new Error("工作区协调响应未确认，未执行工具"); }
+  if (!reply) {
+    runtimeDiagnostic("workspace_timeout", { ...payload, elapsedMs: Math.round(performance.now() - started) });
+    const phase = payload.action === "acquire" ? "未取得租约，工具尚未开始" : payload.action === "release" ? "工具已开始，命令可能已结束；不能确认租约释放，请查看命令日志" : "未确认租约清理";
+    throw new Error(`工作区协调响应超时（${payload.action}，leaseId ${payload.leaseId}，toolCallId ${payload.toolCallId}）：${phase}`);
+  }
   const result = JSON.parse(reply) as Record<string, unknown>;
+  runtimeDiagnostic("workspace_response", { ...payload, elapsedMs: Math.round(performance.now() - started), result });
   if (result.error) { throw new Error(String(result.error)); }
   return result;
 }
@@ -20,6 +27,7 @@ export async function withLease<T>(ctx: ExtensionContext, toolCallId: string, op
   let acquired = false;
   let lease: Lease | undefined;
   let value: T | undefined;
+  let actionError: unknown;
   try {
     if (signal?.aborted) { throw new Error("工具已取消"); }
     const result = await request(ctx, { ...payload, action: "acquire" });
@@ -29,9 +37,17 @@ export async function withLease<T>(ctx: ExtensionContext, toolCallId: string, op
     value = await action(lease);
     success = true;
     return value;
+  } catch (error) {
+    actionError = error;
+    throw error;
   } finally {
-    const released = await request(ctx, { ...payload, action: lease?.descendantsUnconfirmed ? "terminate" : acquired ? "release" : "cancel", success });
-    if (operation === "run_command" && value && typeof value === "object" && "sourceRevision" in value) { value.sourceRevision = Number(released.sourceRevision); }
+    try {
+      const released = await request(ctx, { ...payload, action: lease?.descendantsUnconfirmed ? "terminate" : acquired ? "release" : "cancel", success });
+      if (operation === "run_command" && value && typeof value === "object" && "sourceRevision" in value) { value.sourceRevision = Number(released.sourceRevision); }
+    } catch (error) {
+      runtimeDiagnostic("workspace_cleanup_failed", { ...payload, error: String(error), actionError: actionError === undefined ? undefined : String(actionError), result: value });
+      throw new Error(`${actionError === undefined ? "" : `工具执行错误：${String(actionError)}；`}${String(error)}${value === undefined ? "" : `；已产生执行结果（协调未确认）：${JSON.stringify(value)}`}`);
+    }
   }
 }
 function sourcePath(value: string, writing: boolean): string | undefined {

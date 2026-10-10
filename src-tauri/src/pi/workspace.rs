@@ -35,7 +35,12 @@ impl Workspaces {
         let deadline = std::time::Instant::now()+std::time::Duration::from_secs(25);
         loop {
             if state.cancelled.remove(&id) { state.queue.retain(|v| v != &id); workspace.wake.notify_all(); return Err("工作区等待已取消".into()); }
-            if std::time::Instant::now() >= deadline { state.queue.retain(|v| v != &id); workspace.wake.notify_all(); return Err("工作区等待超时，请重试工具".into()); }
+            if std::time::Instant::now() >= deadline {
+                let holders: Vec<Value> = state.leases.iter().map(|(id,lease)|json!({"leaseId":id,"taskId":lease.task,"toolCallId":lease.tool,"operation":lease.operation,"write":lease.write,"sourceRevision":lease.revision})).collect();
+                let queued = state.queue.len();
+                state.queue.retain(|v| v != &id); workspace.wake.notify_all();
+                return Err(format!("工作区等待超时（25000ms），工具尚未开始 · leaseId {id} · operation {operation} · 排队 {queued} · 占用租约 {}",json!(holders)));
+            }
             if state.queue.front() == Some(&id) && (state.leases.is_empty() || (!write && state.leases.values().all(|v| !v.write))) { break; }
             state = workspace.wake.wait_timeout(state,std::time::Duration::from_millis(250)).map_err(|_| "工作区等待锁异常")?.0;
         }

@@ -41,7 +41,8 @@ function chooseFiles(event: Event): void {
   input.value = "";
 }
 function handleKey(event: KeyboardEvent): void {
-  if (event.isComposing) { return; }
+  if (event.isComposing || event.keyCode === 229) { return; }
+  if (event.key === "Enter" && event.shiftKey) { return; }
   if (menuOpen.value && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key) && !event.ctrlKey) {
     event.preventDefault();
     if (event.key === "Escape") { menuOpen.value = false; }
@@ -49,7 +50,10 @@ function handleKey(event: KeyboardEvent): void {
     else if (actions.value.length) { selectedAction.value = (selectedAction.value + (event.key === "ArrowDown" ? 1 : -1) + actions.value.length) % actions.value.length; }
     return;
   }
-  if (event.ctrlKey && event.key === "Enter") { event.preventDefault(); if (canSend.value && !slash.value) { emit("send"); } }
+  if (event.target instanceof HTMLTextAreaElement && event.key === "Enter" && !event.altKey && !event.metaKey) {
+    event.preventDefault();
+    if (!event.repeat && canSend.value && !slash.value) { emit("send"); }
+  }
 }
 function pasteFiles(event: ClipboardEvent): void {
   const files = Array.from(event.clipboardData?.files ?? []);
@@ -58,7 +62,7 @@ function pasteFiles(event: ClipboardEvent): void {
 const labels: Record<ThinkingLevel, string> = { off: "关闭", minimal: "最低", low: "低", medium: "中", high: "高", xhigh: "更高", max: "最高" };
 </script>
 <template>
-  <div class="shrink-0 px-4 pt-3 pb-5 lg:px-8">
+  <div class="shrink-0 px-4 pt-2 pb-3 lg:px-8">
     <PopoverRoot v-model:open="menuOpen"><PopoverAnchor as-child>
     <div class="mx-auto max-w-3xl rounded-2xl border bg-card p-3 shadow-xs">
       <input ref="picker" type="file" multiple class="hidden" @change="chooseFiles" />
@@ -68,10 +72,10 @@ const labels: Record<ThinkingLevel, string> = { off: "关闭", minimal: "最低"
           <span class="truncate" :title="file.name">{{ file.name }}</span><Button variant="ghost" size="icon" class="size-6 shrink-0" :aria-label="`移除 ${file.name}`" @click="$emit('removeAttachment', file.id)"><X class="size-3" /></Button>
         </div>
       </div>
-      <Textarea v-model="requirement" rows="2" class="min-h-[56px] max-h-50 resize-none border-0 p-0 shadow-none focus-visible:ring-0" aria-label="MOD 需求" placeholder="描述你希望实现的 MOD…" @blur="$emit('save')" @keydown="handleKey" @paste="pasteFiles" />
-      <div class="mt-3 flex flex-wrap items-center gap-2">
+      <Textarea v-model="requirement" rows="2" class="min-h-[44px] max-h-50 resize-none border-0 p-0 text-sm leading-6 shadow-none focus-visible:ring-0" aria-label="MOD 需求" placeholder="描述你希望实现的 MOD…" @blur="$emit('save')" @keydown="handleKey" @paste="pasteFiles" />
+      <div class="mt-2 flex flex-wrap items-center gap-2">
         <PopoverTrigger as-child><Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground" aria-label="添加文件或使用会话功能" title="功能（也可输入 /）" @click="slashMenu = false" @keydown="handleKey"><Plus class="size-4" /></Button></PopoverTrigger>
-        <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{{ working ? '可发送补充要求' : '' }}</span>
+        <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title="Enter 发送，Shift + Enter 换行">{{ working ? '可发送补充要求' : 'Enter 发送 · Shift + Enter 换行' }}</span>
         <ContextUsageIndicator :usage="contextUsage" :compacting="compacting" />
         <span class="max-w-40 truncate text-xs text-foreground">{{ model }}</span>
         <DropdownMenuRoot><DropdownMenuTrigger as-child><Button variant="ghost" size="sm" class="h-8 gap-1 rounded-lg px-2 text-xs text-muted-foreground" :disabled="busy || !thinkingLevels.length" aria-label="模型思考强度"><span>{{ labels[thinkingLevel] }}</span><ChevronDown class="size-3.5" /></Button></DropdownMenuTrigger>
@@ -81,7 +85,7 @@ const labels: Record<ThinkingLevel, string> = { off: "关闭", minimal: "最低"
           </DropdownMenuContent></DropdownMenuPortal>
         </DropdownMenuRoot>
         <Button v-if="working || compacting" size="icon" class="size-8 rounded-full" :disabled="stopping" aria-label="停止会话" title="停止会话" @click="$emit('cancel')"><Square class="size-3.5 fill-current" /></Button>
-        <Button v-if="!(working || compacting) || (working && attachments.length + requirement.trim().length > 0)" size="icon" class="size-8 rounded-full" :disabled="!canSend || !!slash" :aria-label="working ? '发送引导' : '发送提示词'" :title="working ? '发送引导（Ctrl + Enter）' : '发送（Ctrl + Enter）'" @click="$emit('send')"><ArrowUp class="size-4" /></Button>
+        <Button v-if="!(working || compacting) || (working && attachments.length + requirement.trim().length > 0)" size="icon" class="size-8 rounded-full" :disabled="!canSend || !!slash" :aria-label="working ? '发送引导' : '发送提示词'" :title="working ? '发送引导（Enter）' : '发送（Enter）'" @click="$emit('send')"><ArrowUp class="size-4" /></Button>
       </div>
       <p v-if="error" role="alert" class="mt-2 text-xs text-destructive">{{ error }}</p>
     </div>
