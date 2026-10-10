@@ -1,10 +1,11 @@
+import type { Lease } from "./workspace.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, mkdir, open, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export interface TaskContext { taskId: string; modId: string; sessionId: string; generation: number; sourceDirectory: string; stagingId: string; stagingDirectory: string; createdAt: string }
-export interface Receipt { taskId: string; commandId: string; toolCallId: string; exitCode: number | null; status: "succeeded" | "failed" | "cancelled"; logPath: string; program: string; args: string[] }
+export interface Receipt { sourceRevision: number; taskId: string; commandId: string; toolCallId: string; exitCode: number | null; status: "succeeded" | "failed" | "cancelled"; logPath: string; program: string; args: string[] }
 export function context(): TaskContext {
   const raw = process.env.GEN_MOD_TASK_CONTEXT;
   if (!raw) { throw new Error("此连接没有原生任务上下文，不能执行命令或交付"); }
@@ -46,7 +47,8 @@ export function commandEnvironment(): Promise<{ shell?: string; dotnet?: string 
 }
 
 /** 不拼接 shell 字符串；进程继承原生 Job，取消时通过 taskkill 收回命令后代。 */
-export async function runCommand(toolCallId: string, program: string, args: string[], cwd: string, signal?: AbortSignal): Promise<Receipt> {
+export async function runCommand(toolCallId: string, program: string, args: string[], cwd: string, signal?: AbortSignal, lease?: Lease): Promise<Receipt> {
+  if (!lease) { throw new Error("命令缺少独占源码租约"); }
   const task = context();
   const directory = await contained(task.sourceDirectory, resolve(task.sourceDirectory, cwd));
   const commandId = randomUUID();
@@ -84,11 +86,13 @@ export async function runCommand(toolCallId: string, program: string, args: stri
   }
   if (child.stdout) { capture(child.stdout, "stdout"); }
   if (child.stderr) { capture(child.stderr, "stderr"); }
+  let descendants: Promise<void> | undefined;
   const cancel = () => {
     cancelled = true;
     if (process.platform === "win32" && child.pid) {
       const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-      killer.on("error", () => { child.kill(); });
+      descendants = new Promise<void>((done,reject) => { killer.once("error",reject); killer.once("close",code => code === 0 ? done() : reject(new Error("命令后代回收未确认，必须停止运行时"))); });
+      void descendants.catch(() => undefined);
     } else { child.kill(); }
   };
   signal?.addEventListener("abort", cancel, { once: true });
@@ -97,9 +101,10 @@ export async function runCommand(toolCallId: string, program: string, args: stri
   let startupError: Error | undefined;
   try {
     exitCode = await new Promise<number | null>((done) => { child.once("error", (error) => { startupError = error; }); child.once("close", done); });
+    if (descendants) { try { await descendants; } catch (cause) { lease.descendantsUnconfirmed = true; throw cause; } }
     await output;
     if (startupError) { await log.write(redact(startupError.message)); }
   } catch (cause) { await log.write(redact(String(cause))); }
   finally { signal?.removeEventListener("abort", cancel); await log.close(); }
-  return { taskId: task.taskId, commandId, toolCallId, exitCode, status: cancelled ? "cancelled" : exitCode === 0 ? "succeeded" : "failed", logPath, program, args };
+  return { sourceRevision: lease.sourceRevision, taskId: task.taskId, commandId, toolCallId, exitCode, status: cancelled ? "cancelled" : exitCode === 0 ? "succeeded" : "failed", logPath, program, args };
 }

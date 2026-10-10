@@ -155,6 +155,31 @@ pub fn refresh_sessions(app: &tauri::AppHandle, project: &mut crate::storage::mo
 
 #[tauri::command]
 pub fn list_skills(app: tauri::AppHandle) -> Result<Vec<SkillView>, String> { list(&app) }
+
+/// 按注册名称定位入口文件，复用能力清单路径，不接受前端传入任意文件路径。
+fn skill_file(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
+    let skill = list(app)?.into_iter().find(|v| v.definition.name == name).ok_or("能力不存在")?;
+    let root = PathBuf::from(skill.definition.path);
+    paths::reject_redirect(&root)?;
+    let file = root.join("SKILL.md");
+    paths::reject_redirect(&file)?;
+    if !file.is_file() { return Err("SKILL.md 不是普通文件".into()); }
+    Ok(file)
+}
+
+/// 返回已安装能力的完整 Markdown 文本，仅供详情查看。
+#[tauri::command]
+pub fn read_skill_content(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    fs::read_to_string(skill_file(&app, &name)?).map_err(|e| e.to_string())
+}
+
+/// 在系统文件资源管理器中选中已安装能力的入口文件。
+#[tauri::command]
+pub fn reveal_skill_file(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().reveal_item_in_dir(skill_file(&app, &name)?.to_string_lossy().into_owned()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn set_skill_enabled(app: tauri::AppHandle, state: tauri::State<mods::StorageState>, name: String, enabled: bool) -> Result<(), String> {
     crate::pi::bridge::while_idle(&app, || {

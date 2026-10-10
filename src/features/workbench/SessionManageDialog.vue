@@ -20,7 +20,7 @@ watch(action, value => { name.value = value?.name ?? ""; error.value = ""; });
 /** 删除当前会话前关闭其空闲进程；不清理源码、交付版本和任务日志。 */
 async function submit(): Promise<void> {
   const selected = action.value;
-  if (!selected || saving.value || session.busy) { return; }
+  if (!selected || saving.value || (selected.kind === "delete" && session.isBusy(selected.modId,selected.sessionId))) { return; }
   saving.value = true;
   error.value = "";
   const active = session.modId === selected.modId && session.sessionId === selected.sessionId;
@@ -46,7 +46,7 @@ async function submit(): Promise<void> {
         <p v-if="action?.kind === 'delete'" class="break-words text-sm">{{ action.name }}</p>
         <Input v-else v-model="name" maxlength="120" required aria-label="会话名称" autofocus :disabled="saving" />
         <p v-if="error" role="alert" class="text-xs text-destructive">{{ error }}</p>
-        <div class="flex justify-end gap-2"><Button type="button" variant="ghost" :disabled="saving" @click="action = undefined">取消</Button><Button type="submit" :variant="action?.kind === 'delete' ? 'destructive' : 'default'" :disabled="saving || session.busy || (action?.kind === 'rename' && !name.trim())">{{ saving ? '处理中…' : action?.kind === 'delete' ? '删除会话' : '保存' }}</Button></div>
+        <div class="flex justify-end gap-2"><Button type="button" variant="ghost" :disabled="saving" @click="action = undefined">取消</Button><Button type="submit" :variant="action?.kind === 'delete' ? 'destructive' : 'default'" :disabled="saving || (action?.kind === 'delete' && session.isBusy(action.modId,action.sessionId)) || (action?.kind === 'rename' && !name.trim())">{{ saving ? '处理中…' : action?.kind === 'delete' ? '删除会话' : '保存' }}</Button></div>
       </form>
     </DialogContent>
   </Dialog>

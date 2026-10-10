@@ -1,3 +1,4 @@
+import type { Lease } from "./workspace.js";
 import { mkdir, copyFile, writeFile, readFile, lstat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
@@ -5,7 +6,7 @@ import { context, contained, safeRelative, runCommand } from "./commands.js";
 
 export interface DeliveryInput { files: { source: string; target: string }[]; commandIds: string[]; targetDirectoryHint: string }
 /** 从当前任务上下文取得 staging；模型不能自行指定其他任务或既有版本目录。 */
-export async function prepareDelivery(toolCallId: string, input: DeliveryInput, signal?: AbortSignal) {
+export async function prepareDelivery(toolCallId: string, input: DeliveryInput, signal?: AbortSignal, lease?: Lease) {
   const task = context();
   if (!input.files.length || !input.commandIds.length) { throw new Error("交付需要文件和本任务成功命令记录"); }
   const targetNames = new Set<string>();
@@ -35,7 +36,7 @@ export async function prepareDelivery(toolCallId: string, input: DeliveryInput, 
   await writeFile(resolve(task.stagingDirectory, "files.json"), JSON.stringify(files, null, 2), { flag: "wx" });
   const scriptPath = resolve(task.stagingDirectory, "package.ps1");
   await writeFile(scriptPath, 'param([string]$Files,[string]$Zip)\n$ErrorActionPreference="Stop"\nAdd-Type -AssemblyName System.IO.Compression.FileSystem\n[IO.Compression.ZipFile]::CreateFromDirectory($Files,$Zip)\n', { flag: "wx" });
-  const receipt = await runCommand(toolCallId, "powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, resolve(task.stagingDirectory, "files"), zipPath], ".", signal);
+  const receipt = await runCommand(toolCallId, "powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, resolve(task.stagingDirectory, "files"), zipPath], ".", signal,lease);
   if (receipt.status !== "succeeded") { throw new Error(`ZIP 打包失败，日志：${receipt.logPath}`); }
   return { taskId: task.taskId, stagingId: task.stagingId, commandIds: [...input.commandIds, receipt.commandId], manifestPath, zipPath, commands: [receipt] };
 }

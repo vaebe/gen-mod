@@ -7,7 +7,7 @@ import { PopoverRoot, PopoverAnchor, PopoverTrigger, PopoverPortal, PopoverConte
 import ContextUsageIndicator from "./ContextUsageIndicator.vue";
 import type { ContextUsage, PromptAttachment, ThinkingLevel } from "@/contracts/session";
 const requirement = defineModel<string>({ required: true });
-const props = defineProps<{ attachments: PromptAttachment[]; readingAttachments: boolean; working: boolean; busy: boolean; saving: boolean; configured: boolean; model: string; error: string; thinkingLevel: ThinkingLevel; thinkingLevels: ThinkingLevel[]; contextUsage?: ContextUsage; compacting: boolean; canCompact: boolean }>();
+const props = defineProps<{ attachments: PromptAttachment[]; readingAttachments: boolean; working: boolean; canSteer: boolean; stopping: boolean; busy: boolean; saving: boolean; configured: boolean; model: string; error: string; thinkingLevel: ThinkingLevel; thinkingLevels: ThinkingLevel[]; contextUsage?: ContextUsage; compacting: boolean; canCompact: boolean }>();
 const emit = defineEmits<{ send: []; cancel: []; save: []; thinking: [level: ThinkingLevel]; compact: []; files: [files: File[]]; removeAttachment: [id: string] }>();
 const picker = useTemplateRef<HTMLInputElement>("picker");
 const menuOpen = shallowRef(false);
@@ -19,7 +19,7 @@ const actions = computed(() => [
   { id: "files", label: "选择文件", command: "/file", description: "图片、文本和源码", icon: Paperclip, disabled: props.readingAttachments },
   { id: "compact", label: "压缩", command: "/compact", description: props.busy ? "会话空闲时可使用" : `压缩此聊天的上下文${contextPercent.value !== undefined ? `（已使用 ${contextPercent.value}%）` : ''}`, icon: Shrink, disabled: props.busy || !props.configured || !props.canCompact },
 ].filter(action => !slashMenu.value || `${action.label} ${action.command}`.toLowerCase().includes(slash.value?.[1]?.toLowerCase() ?? "")));
-const canSend = computed(() => !props.busy && !props.saving && !props.readingAttachments && props.configured && (requirement.value.trim() || props.attachments.length));
+const canSend = computed(() => (!props.busy || props.canSteer) && !props.saving && !props.readingAttachments && props.configured && (requirement.value.trim() || props.attachments.length));
 watch(requirement, () => {
   if (slash.value) { slashMenu.value = true; selectedAction.value = 0; menuOpen.value = true; }
   else if (slashMenu.value) { menuOpen.value = false; slashMenu.value = false; }
@@ -71,7 +71,7 @@ const labels: Record<ThinkingLevel, string> = { off: "关闭", minimal: "最低"
       <Textarea v-model="requirement" rows="2" class="min-h-[56px] max-h-50 resize-none border-0 p-0 shadow-none focus-visible:ring-0" aria-label="MOD 需求" placeholder="描述你希望实现的 MOD…" @blur="$emit('save')" @keydown="handleKey" @paste="pasteFiles" />
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <PopoverTrigger as-child><Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground" aria-label="添加文件或使用会话功能" title="功能（也可输入 /）" @click="slashMenu = false" @keydown="handleKey"><Plus class="size-4" /></Button></PopoverTrigger>
-        <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{{ working ? '新增需求保存为草稿' : '' }}</span>
+        <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{{ working ? '可发送补充要求' : '' }}</span>
         <ContextUsageIndicator :usage="contextUsage" :compacting="compacting" />
         <span class="max-w-40 truncate text-xs text-foreground">{{ model }}</span>
         <DropdownMenuRoot><DropdownMenuTrigger as-child><Button variant="ghost" size="sm" class="h-8 gap-1 rounded-lg px-2 text-xs text-muted-foreground" :disabled="busy || !thinkingLevels.length" aria-label="模型思考强度"><span>{{ labels[thinkingLevel] }}</span><ChevronDown class="size-3.5" /></Button></DropdownMenuTrigger>
@@ -80,8 +80,8 @@ const labels: Record<ThinkingLevel, string> = { off: "关闭", minimal: "最低"
             <DropdownMenuItem v-for="level in thinkingLevels" :key="level" class="flex cursor-pointer items-center justify-between gap-6 rounded-lg px-3 py-2.5 text-sm outline-none data-[highlighted]:bg-muted" :class="thinkingLevel === level && 'bg-muted/60'" @select="!busy && level !== thinkingLevel && $emit('thinking', level)"><span>{{ labels[level] }}</span><Check v-if="thinkingLevel === level" class="size-4 text-muted-foreground" /></DropdownMenuItem>
           </DropdownMenuContent></DropdownMenuPortal>
         </DropdownMenuRoot>
-        <Button v-if="working || compacting" size="icon" class="size-8 rounded-full" aria-label="停止会话" title="停止会话" @click="$emit('cancel')"><Square class="size-3.5 fill-current" /></Button>
-        <Button v-else size="icon" class="size-8 rounded-full" :disabled="!canSend || !!slash" aria-label="发送提示词" title="发送（Ctrl + Enter）" @click="$emit('send')"><ArrowUp class="size-4" /></Button>
+        <Button v-if="working || compacting" size="icon" class="size-8 rounded-full" :disabled="stopping" aria-label="停止会话" title="停止会话" @click="$emit('cancel')"><Square class="size-3.5 fill-current" /></Button>
+        <Button v-if="!(working || compacting) || (working && attachments.length + requirement.trim().length > 0)" size="icon" class="size-8 rounded-full" :disabled="!canSend || !!slash" :aria-label="working ? '发送引导' : '发送提示词'" :title="working ? '发送引导（Ctrl + Enter）' : '发送（Ctrl + Enter）'" @click="$emit('send')"><ArrowUp class="size-4" /></Button>
       </div>
       <p v-if="error" role="alert" class="mt-2 text-xs text-destructive">{{ error }}</p>
     </div>

@@ -89,6 +89,17 @@ fn directory(app: &tauri::AppHandle, context: &TaskContext) -> Result<PathBuf, S
     Ok(paths::project_dir(app, &context.mod_id)?.join("logs").join(&context.task_id).join("changes"))
 }
 
+/// 仅哈希可构建输入；交付 staging 与任务专属输出不属于源码 revision。
+pub fn source_fingerprint(root: &Path, exclusions: &[String]) -> Result<String,String> {
+    let files = snapshot(root,exclusions)?;
+    let mut hasher = Sha256::new();
+    for (path,file) in files { hasher.update(path.as_bytes()); hasher.update([0]); hasher.update(file.sha256.as_bytes()); }
+    Ok(format!("{:x}",hasher.finalize()))
+}
+pub fn source_manifest(root: &Path, exclusions: &[String]) -> Result<BTreeMap<String,String>,String> {
+    Ok(snapshot(root,exclusions)?.into_iter().map(|(path,file)|(path,file.sha256)).collect())
+}
+
 /// 在任何 prompt/tool 写入之前保存文本基准，之后历史差异不读可变源码。
 pub fn begin(app: &tauri::AppHandle, context: &TaskContext, skill_exclusions: &[String]) -> Result<(), String> {
     let directory = directory(app, context)?;
@@ -142,10 +153,8 @@ pub fn refresh(app: &tauri::AppHandle, context: &TaskContext) -> Result<(), Stri
 
 fn context(app: &tauri::AppHandle, mod_id: &str, task_id: &str) -> Result<TaskContext, String> {
     paths::validate_id(task_id)?;
-    let project = paths::project_dir(app, mod_id)?;
     mods::read_project(app, mod_id)?;
-    let file = crate::artifacts::registry::checked_path(&project, &format!("logs/{task_id}/task.json"))?;
-    let task: crate::pi::tasks::TaskRecord = read_json(&file)?;
+    let task = crate::storage::repository::task(app, mod_id, task_id)?;
     if task.context.mod_id != mod_id || task.context.task_id != task_id { return Err("任务不属于当前项目".into()); }
     Ok(task.context)
 }
@@ -171,4 +180,14 @@ pub fn get_task_file_diff(app: tauri::AppHandle, mod_id: String, task_id: String
         similar::TextDiff::from_lines(before.as_deref().unwrap_or(""), after.as_deref().unwrap_or("")).iter_all_changes().map(|line| DiffLine { kind: match line.tag() { similar::ChangeTag::Delete => "delete", similar::ChangeTag::Insert => "insert", _ => "equal" }.into(), text: line.to_string() }).collect()
     } else { vec![] };
     Ok(FileDiff { change, before, after, lines })
+}
+
+/// 工具租约内记录的操作归本任务，区别于整个共享目录的累计差异。
+#[tauri::command]
+pub fn list_task_operations(app: tauri::AppHandle, mod_id: String, task_id: String) -> Result<Vec<serde_json::Value>,String> {
+    context(&app,&mod_id,&task_id)?;
+    let path=paths::project_dir(&app,&mod_id)?.join("logs").join(task_id).join("workspace-operations.jsonl");
+    if !path.exists() { return Ok(vec![]); } paths::reject_redirect(&path)?;
+    use std::io::BufRead;
+    std::io::BufReader::new(fs::File::open(path).map_err(|e|e.to_string())?).lines().map(|line|serde_json::from_str(&line.map_err(|e|e.to_string())?).map_err(|e|e.to_string())).collect()
 }

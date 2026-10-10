@@ -26,6 +26,10 @@ export type PromptAttachment = { id: string; name: string; size: number } & (
 );
 
 export interface ChatMessage {
+  taskId?: string;
+  inputId?: string;
+  inputStatus?: string;
+  entryId?: string;
   id: string;
   role: "user" | "assistant";
   parts: MessagePart[];
@@ -39,6 +43,10 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
 
 /** pi 当前窗口估算，不是整个会话累计计费 token。 */
 export interface ContextUsage {
+  sampledAt?: string;
+  estimated?: boolean;
+  generation?: number;
+  historical?: boolean;
   tokens: number | null;
   contextWindow: number;
   percent: number | null;
@@ -51,3 +59,6 @@ export interface ToolRun {
   output?: unknown;
   status: "waiting" | "running" | "succeeded" | "failed" | "cancelled";
 }
+
+/** 仅应用引导关联；正式历史仍来自 pi JSONL。 */
+export interface SteeringInput { inputId: string;taskId: string;status: string;message: string;submittedAt: string;messageTimestamp?: number;entryId?: string }

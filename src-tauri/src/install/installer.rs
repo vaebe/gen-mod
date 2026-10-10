@@ -53,7 +53,7 @@ pub fn preview_install(app: tauri::AppHandle, storage: tauri::State<mods::Storag
     let mut project = mods::read_project(&app, &mod_id)?;
     project.last_deployment_directory = Some(preview.target_directory.clone());
     project.updated_at = mods::now()?;
-    mods::write_json(&paths::project_dir(&app, &mod_id)?.join("mod.json"), &project)?;
+    crate::storage::repository::save(&app, &mut project)?;
     let mut previews = state.0.lock().map_err(|_| "安装预览锁异常")?;
     previews.clear(); // 单用户确认流程，旧预览失效。
     previews.insert(preview.preview_id.clone(), preview.clone());
@@ -67,8 +67,9 @@ pub fn install_version(app: tauri::AppHandle, storage: tauri::State<mods::Storag
     let preview = state.0.lock().map_err(|_| "安装预览锁异常")?.remove(&preview_id).ok_or("安装预览已失效，请重新预览")?;
     let current = calculate(&app, &preview.mod_id, &preview.version_id, &preview.target_directory)?;
     if serde_json::to_value(&current.entries).map_err(|e| e.to_string())? != serde_json::to_value(&preview.entries).map_err(|e| e.to_string())? { return Err("目标文件在预览后发生变化，请重新确认".into()); }
-    let project_root = paths::project_dir(&app, &preview.mod_id)?;
     let mut record = InstallationRecord { installation_id: uuid::Uuid::new_v4().to_string(), version_id: preview.version_id.clone(), target_directory: preview.target_directory.clone(), attempted_at: mods::now()?, status: InstallationStatus::Failed, rollback: RollbackStatus::NotNeeded, backup_directory: None, error: None };
+    let operation = serde_json::json!({"record":record});
+    crate::storage::repository::file_operation(&app,&record.installation_id,&preview.mod_id,"install","pending",&operation)?;
     let mut touched = false;
     let result = (|| -> Result<(), String> {
         for entry in &preview.entries {
@@ -87,26 +88,19 @@ pub fn install_version(app: tauri::AppHandle, storage: tauri::State<mods::Storag
         record.error = Some(error);
         if touched { record.rollback = RollbackStatus::NotAttempted; }
     } else { record.status = InstallationStatus::Succeeded; }
-    let mut project = mods::read_project(&app, &preview.mod_id)?;
-    if matches!(record.status, InstallationStatus::Succeeded) {
-        project.installed_targets.retain(|target| target.target_directory != preview.target_directory);
-        project.installed_targets.push(InstalledTarget { target_directory: preview.target_directory.clone(), version_id: Some(preview.version_id.clone()), state: TargetState::Known });
-    } else if touched {
-        project.installed_targets.retain(|target| target.target_directory != preview.target_directory);
-        project.installed_targets.push(InstalledTarget { target_directory: preview.target_directory.clone(), version_id: None, state: TargetState::Uncertain });
-    }
-    project.installations.push(record.clone()); project.updated_at = mods::now()?;
-    if let Err(error) = mods::write_json(&project_root.join("mod.json"), &project) {
-        // 文件不回退；尝试保存失败记录，避免旧的已安装标记冒充本次成功。
-        record.status = InstallationStatus::Failed;
-        record.rollback = if touched { RollbackStatus::NotAttempted } else { RollbackStatus::NotNeeded };
-        record.error = Some(format!("安装记录保存失败：{error}；本次未备份，请核对目标文件"));
-        if touched {
-            project.installed_targets.retain(|target| target.target_directory != preview.target_directory);
-            project.installed_targets.push(InstalledTarget { target_directory: preview.target_directory.clone(), version_id: None, state: TargetState::Uncertain });
+    let saved = crate::storage::repository::update(&app,&preview.mod_id,|project| {
+        if matches!(record.status,InstallationStatus::Succeeded) || touched {
+            project.installed_targets.retain(|target|target.target_directory!=preview.target_directory);
+            project.installed_targets.push(InstalledTarget {target_directory:preview.target_directory.clone(),version_id:if matches!(record.status,InstallationStatus::Succeeded) {Some(preview.version_id.clone())} else {None},state:if matches!(record.status,InstallationStatus::Succeeded) {TargetState::Known} else {TargetState::Uncertain}});
         }
-        if let Some(last) = project.installations.last_mut() { *last = record.clone(); }
-        mods::write_json(&project_root.join("mod.json"), &project).map_err(|error| format!("{}；失败记录也无法保存：{error}", record.error.as_deref().unwrap_or("安装失败")))?;
+        project.installations.push(record.clone()); project.updated_at=mods::now()?; Ok(())
+    });
+    if let Err(error) = saved {
+        record.status=InstallationStatus::Failed; record.rollback=if touched {RollbackStatus::NotAttempted} else {RollbackStatus::NotNeeded};
+        record.error=Some(format!("安装记录未提交：{error}；目标文件未回退"));
+        crate::storage::repository::file_operation(&app,&record.installation_id,&preview.mod_id,"install","pending",&serde_json::json!({"record":record}))?;
+        return Err(record.error.clone().unwrap_or_default());
     }
+    crate::storage::repository::file_operation(&app,&record.installation_id,&preview.mod_id,"install","done",&serde_json::json!({"record":record}))?;
     Ok(record)
 }

@@ -17,6 +17,7 @@ export function createPiClient() {
   const listeners = new Set<(event: PiEnvelope) => void>();
   let settledSeen = false;
   let minimumGeneration = 0;
+  let identity = { modId: "", sessionId: "" };
 
   function rejectAll(message: string): void {
     for (const request of pending.values()) {
@@ -27,6 +28,8 @@ export function createPiClient() {
   }
 
   function receive(event: PiEnvelope): void {
+    if (event.modId !== identity.modId || (identity.sessionId && event.sessionId !== identity.sessionId)) { return; }
+    identity.sessionId = event.sessionId;
     if (event.generation < Math.max(generation.value, minimumGeneration)) { return; }
     if (event.generation > generation.value) {
       generation.value = event.generation;
@@ -63,13 +66,18 @@ export function createPiClient() {
     return result;
   }
 
+  function select(modId: string, sessionId: string, savedGeneration: number): void {
+    identity = {modId,sessionId}; generation.value = savedGeneration;
+  }
   async function connect(modId: string, sessionId?: string): Promise<void> {
+    identity = { modId, sessionId: sessionId ?? "" };
     rejectAll("正在建立新连接");
     minimumGeneration = generation.value + 1;
     connection.value = "connecting";
     try {
-      const result = await nativeCall<number>("connect_pi", { modId, sessionId, onEvent: channel() });
-      generation.value = result;
+      const result = await nativeCall<{ modId: string; sessionId: string; generation: number }>("connect_pi", { modId, sessionId, onEvent: channel() });
+      generation.value = result.generation;
+      identity = result;
       connection.value = "connected";
     } catch (error) { minimumGeneration = generation.value; connection.value = "error"; throw error; }
   }
@@ -82,7 +90,7 @@ export function createPiClient() {
         reject(new Error("RPC 响应超时；任务可能仍在运行，请查询状态"));
       }, timeoutMs);
       pending.set(id, { resolve, reject, timer });
-      nativeCall<void>("send_pi_command", { generation: generation.value, command: { ...fields, type, id } }).catch((error: Error) => {
+      nativeCall<void>("send_pi_command", { ...identity, generation: generation.value, command: { ...fields, type, id } }).catch((error: Error) => {
         const item = pending.get(id);
         if (!item) { return; }
         clearTimeout(item.timer);
@@ -130,8 +138,24 @@ export function createPiClient() {
     }
   }
 
+  /** 引导使用独立受控入口，保持原 generation 与 taskId。 */
+  async function steer(taskId: string, inputId: string, message: string, images: ImageInput[]): Promise<PiRecord> {
+    const response = new Promise<PiRecord>((resolve,reject) => {
+      const timer = setTimeout(() => { pending.delete(inputId); reject(new Error("引导响应未确认；未自动重发，请检查历史")); },30_000);
+      pending.set(inputId,{resolve,reject,timer});
+    });
+    void response.catch(() => undefined);
+    try {
+      await nativeCall("steer_mod_task",{...identity,generation:generation.value,taskId,inputId,message,images});
+      return await response;
+    } catch (cause) {
+      const item = pending.get(inputId);
+      if (item) { clearTimeout(item.timer); pending.delete(inputId); item.reject(cause as Error); }
+      throw cause;
+    }
+  }
   async function disconnect(): Promise<void> {
-    await nativeCall("disconnect_pi");
+    if (identity.modId && identity.sessionId && connection.value !== "disconnected") { await nativeCall("disconnect_pi", { ...identity, generation: generation.value }); }
     rejectAll("连接已关闭");
     connection.value = "disconnected";
     active.value = false;
@@ -141,5 +165,5 @@ export function createPiClient() {
     listeners.add(listener);
     return () => { listeners.delete(listener); };
   }
-  return { connection, submissionState, active, generation, connect, prompt, request, disconnect, subscribe };
+  return { connection, submissionState, active, generation, select, connect, prompt, steer, request, disconnect, subscribe };
 }

@@ -23,7 +23,7 @@ export const modService = {
   rename(modId: string, name: string): Promise<ModProject> {
     return nativeCall("rename_mod", { modId, name });
   },
-  saveDraft(modId: string, requirement: string): Promise<ModProject> {
-    return nativeCall("save_mod_draft", { modId, requirement });
+  saveDraft(modId: string, requirement: string, sessionId?: string, expectedRequirement?: string): Promise<ModProject> {
+    return nativeCall("save_mod_draft", { modId, requirement, sessionId, expectedRequirement });
   },
 };

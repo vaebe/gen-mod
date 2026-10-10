@@ -9,6 +9,9 @@ export interface PiRecord {
   [key: string]: unknown;
 }
 export interface PiEnvelope {
+  modId: string;
+  sessionId: string;
+  taskId?: string;
   generation: number;
   kind: "record" | "diagnostic" | "exit" | "task" | "artifact";
   record: PiRecord;

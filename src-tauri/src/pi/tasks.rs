@@ -15,6 +15,8 @@ pub struct TaskContext {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandReceipt {
+    #[serde(default)]
+    pub source_revision: Option<u64>,
     pub task_id: String,
     pub command_id: String,
     pub tool_call_id: String,

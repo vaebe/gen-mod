@@ -7,6 +7,7 @@ export interface ChatState {
   liveMessageId?: string;
   /** 尚未由 pi 用户消息确认的本地提交占位，不写入会话历史。 */
   pendingUserId?: string;
+  pendingInputs?: string[];
 }
 export function emptyChat(): ChatState { return { messages: [], tools: {} }; }
 function object(value: unknown): Record<string, unknown> {
@@ -30,7 +31,7 @@ function normalize(state: ChatState, raw: unknown, id: string, final: boolean): 
       state.tools[part.id] = previous ?? { toolCallId: part.id, name: String(part.name ?? "工具"), args: part.arguments, status: "waiting" };
     }
   }
-  return { id, role: message.role, parts, final, error: typeof message.errorMessage === "string" ? message.errorMessage : undefined,
+  return { id, entryId: typeof message.appEntryId === "string" ? message.appEntryId : undefined, role: message.role, parts, final, error: typeof message.errorMessage === "string" ? message.errorMessage : undefined,
     timestamp: typeof message.timestamp === "number" ? message.timestamp : undefined,
     stopReason: typeof message.stopReason === "string" ? message.stopReason : undefined };
 }
@@ -46,12 +47,15 @@ export function reduceRecord(state: ChatState, record: PiRecord): ChatState {
       return next;
     }
     if (message.role !== "user" && message.role !== "assistant") { return next; }
-    const id = message.role === "user" && next.pendingUserId ? next.pendingUserId : record.type === "message_start" || !next.liveMessageId ? crypto.randomUUID() : next.liveMessageId;
+    const confirmedId = typeof record.inputId === "string" ? record.inputId : undefined;
+    const id = message.role === "user" && confirmedId ? confirmedId : message.role === "user" && next.pendingUserId ? next.pendingUserId : record.type === "message_start" || !next.liveMessageId ? crypto.randomUUID() : next.liveMessageId;
     const normalized = normalize(next, message, id, record.type === "message_end");
     if (normalized) {
+      normalized.inputId = confirmedId;
+      normalized.taskId = typeof record.taskId === "string" ? record.taskId : undefined;
       const index = next.messages.findIndex((item) => item.id === id);
       if (index >= 0) { next.messages[index] = normalized; } else { next.messages.push(normalized); }
-      if (message.role === "user") { next.pendingUserId = undefined; }
+      if (message.role === "user") { if (confirmedId) { next.pendingInputs = next.pendingInputs?.filter(value => value !== confirmedId); } else { next.pendingUserId = undefined; } }
       next.liveMessageId = record.type === "message_end" ? undefined : id;
     }
   } else if (record.type.startsWith("tool_execution_")) {

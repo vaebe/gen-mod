@@ -30,6 +30,7 @@ tempfile = "3"
 dotenvy = "0.15"
 sha2 = "0.10"
 similar = "2"
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]

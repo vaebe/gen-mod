@@ -89,3 +89,50 @@
 - 新安装直接覆盖，无备份和自动回退。复制后失败将目标标为 uncertain；新增 notAttempted 回退状态，历史备份记录保持可读。
 - 原生删除先核对绝对目录边界，再暂时移走选定版本，元数据写入失败恢复目录；成功后清理应用内版本包。未实际删除用户版本或部署文件。
 - 限定 vue-tsc（work/tsconfig.mod-install.json）与 cargo check --lib --locked --offline 通过；未运行测试、启动应用或验收覆盖安装与删除行为。当前决策已同步到 project-context.md。
+
+
+## 2026-10-09：多会话并发、运行中引导与 SQLite
+
+### 范围及实施结果
+
+按 docs/2026-10-09-multi-session-steering-plan.md 任务 1–7 主代理顺序实施，没有使用子代理。执行前核对已提交源码与已有改动，保留 docs/README.md 及既有 output/work/索引内容，不提交。
+
+- 数据库：新增 database/repository/migration 与 schema 001，rusqlite 0.40.2 bundled SQLite 3.53.2；WAL、外键、短事务、项目局部更新及 revision，旧项目按事务幂等导入、错误隔离；项目/会话/任务/摘要/引导/统计/恢复记录改为 SQLite。
+- 多槽：原生 manager 与前端 runtime registry 按 modId/sessionId 独立维护代次、任务、pi 进程、消息、计时、草稿和附件；所有事件带身份，导航只切展示，后台持久事件及版本通知继续接收。
+- 共享源码：FIFO 工具租约、读取哈希及 stale 写入拒绝；命令排队 revision 校验、后代进程回收后释放，prepare_delivery 沿用租约；回执和交付原生 revision 校验；保留脚本、fresh output、哈希等原有保护，记录任务操作和共享差异。
+- 引导：受控 IPC 提交文本/图片，同 taskId/generation/进程；SQLite inputId 与队列/正式历史 entryId 关联，多个占位按 ID 替换；未确认不会自动重发，重启显示未关联项提示。
+- 界面：运行时发送引导与独立停止按钮，精确禁用准备/压缩/停止；侧栏圆环与 hover 菜单分开占位，reduced motion 静态标记；恢复上下文统计注明历史采样；无关 AI 任务不禁用既有产物操作。
+- 恢复：启动中断旧活动任务、处理未确认引导，保留稳定会话与 JSONL；安装及交付文件操作恢复记录避免数据库持久化失败被误报为成功。没有直接操作用户现有数据。
+
+### 实际静态检查
+
+- CodeGraph 已先执行 explore 获取入口；再核对当前源码、SDK 协议及旧元数据入口。
+- Vue：node node_modules/vue-tsc/bin/vue-tsc.js --noEmit -p work/tsconfig.multi-session.json，退出 0。最初沙箱未正确读取 pnpm 链接，正常依赖权限下检查通过。
+- runtime：node node_modules/typescript/bin/tsc --noEmit -p work/tsconfig.runtime.json，退出 0。
+- Rust：cargo check --manifest-path src-tauri/Cargo.toml --lib --locked --offline，退出 0，无警告。中途修正实际编译错误后，对最终源码重新检查通过。
+- 依赖：cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc 完成；初次沙箱 DNS 失败，未修改全局网络配置。
+
+### 未执行与用户验收
+
+未运行测试、Lint、应用、模型或游戏；没有对现有用户数据运行迁移，没有修改游戏部署目录，没有新版安装包构建、提交或推送。现有安装包不包含此次代码。
+
+计划每个 Gate 均待真实运行。用户补 Key 后在临时数据副本中验收迁移幂等/错误隔离、并发会话及切换、共享工具冲突/取消/后代停止、连续文本图片引导、过期交付拒绝、后台产物与重启恢复；旧历史、版本、安装记录和 skill 校验分别核对。静态检查不证明这些行为已经实际运行成功。
+
+
+### 最终收尾结果
+
+- node scripts/prepare-runtime.mjs：退出 0；Node 22.19.0 / pi 1.1.0，17,375 个运行时文件与 13 个 skills 文件已同步。之后只修改前端/Rust/文档，没有再改 runtime 扩展。
+- git -c core.safecrlf=false diff --check：退出 0；另对本次 11 个新增文件进行限定空白检查，0 处问题。Git 初次默认检查仅提示 CRLF/LF，不是空白错误。
+- codegraph sync → codegraph status：依次退出 0，status 返回 [OK] Index is up to date。仅维护索引，不作为运行验收。
+- 最后 Vue 限定类型检查、Rust lib locked/offline 编译均再次退出 0，无 Rust 警告；runtime 检查通过后该范围未再改动。
+- 最后核对补齐：空会话已归档但旧任务保留时 initialDraft 不丢失；新建会话使用事务重读；会话删除历史文件前有恢复日志；意外 stdout 退出记录 interrupted，手动停止记录 cancelled，退出通知刷新任务、项目和界面状态。
+
+
+## 2026-10-10：启动时缺少 sessions 字段
+
+- 用户实际启动报告 Tauri setup hook 失败：missing field sessions。确认由 SQLite 仓储的 DTO 组合顺序导致：save_on 按设计从 projects.payload 移除 sessions，read_on 却先将 payload 解为 ModProject，尚未查询独立 sessions 表便报错；initialize → interrupt_previous / reconcile_files → list → read_on 可达此路径。
+- 本次只修改 repository::read_on：先解析项目 JSON 对象，查询未归档的 sessions 并合并，再反序列化完整 ModProject。保持旧文件迁移的必需字段校验，不给全局 DTO 添加缺省值；无需删除 SQLite、重新导入或修改用户数据。
+- cargo check --manifest-path src-tauri/Cargo.toml --lib --locked --offline：退出 0，无警告。
+- 未运行测试、未启动应用、未访问或修改用户应用数据。用户需重新执行 pnpm run dev:app 验收启动；本轮静态检查不等同于启动验收。
+
+- 本次 codegraph sync → codegraph status 均退出 0，返回 [OK] Index is up to date。限定文档 git diff --check 退出 0；未跟踪 repository.rs 的 git diff --no-index --check 无空白错误输出（退出 1 表示存在文件差异），另对该源码和计划逐行空白检查退出 0，0 处问题。
