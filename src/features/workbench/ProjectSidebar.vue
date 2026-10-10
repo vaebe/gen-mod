@@ -30,10 +30,21 @@ async function createSession(modId: string): Promise<void> {
 
 <template>
   <Sidebar>
-    <SidebarHeader class="px-4 pt-5 pb-4"><div class="flex items-center gap-2 text-sm font-semibold tracking-wide"><Boxes class="size-5" />GenMod</div><p class="text-xs text-muted-foreground">把想法变成游戏里的变化</p></SidebarHeader>
+    <SidebarHeader class="px-4 pt-5 pb-4">
+      <div class="flex items-center text-sm font-semibold tracking-wide">
+        <Boxes class="size-5" />GenMod
+      </div>
+      <p class="text-xs text-muted-foreground">把想法变成游戏里的变化</p>
+    </SidebarHeader>
     <SidebarContent>
       <SidebarGroup><SidebarMenu>
-        <SidebarMenuItem><SidebarMenuButton as-child :is-active="route.path === '/mods'"><RouterLink to="/mods"><Folder />全部项目</RouterLink></SidebarMenuButton></SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton as-child :is-active="route.path === '/mods'">
+            <RouterLink to="/mods">
+              <Folder />全部项目
+            </RouterLink>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
       </SidebarMenu></SidebarGroup>
       <SidebarGroup><SidebarGroupLabel>最近的项目</SidebarGroupLabel>
         <p v-if="projects.loading" class="px-2 py-3 text-xs text-muted-foreground">正在读取项目…</p>

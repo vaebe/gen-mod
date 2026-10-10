@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$ReferenceDirectory)
+﻿param([Parameter(Mandatory=$true)][string]$ReferenceDirectory)
 $ErrorActionPreference = 'Stop'
 try {
     if (-not (Test-Path -LiteralPath $ReferenceDirectory -PathType Container)) { throw '参考程序集目录不存在。' }

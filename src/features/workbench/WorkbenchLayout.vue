@@ -23,7 +23,7 @@ onMounted(() => { void projects.refresh(); });
   <SidebarProvider class="h-full min-h-0" :style="{ '--sidebar-width': '15rem' }">
     <ProjectSidebar @create="createOpen = true" />
     <SidebarInset class="min-h-0 overflow-hidden">
-      <header class="flex h-13 shrink-0 items-center gap-3 border-b px-4"><SidebarTrigger /><span class="text-sm font-medium">{{ route.meta.title }}</span><div class="ml-auto flex items-center gap-3"><span class="text-xs text-muted-foreground">本地工作区</span><Button variant="ghost" size="icon" aria-label="切换上下文面板" @click="contextOpen = !contextOpen"><PanelRight class="size-4" /></Button></div></header>
+      <header class="flex h-10 shrink-0 items-center gap-2 border-b px-3"><SidebarTrigger /><span class="text-sm font-medium">{{ route.meta.title }}</span><div class="ml-auto flex items-center gap-2"><span class="text-xs text-muted-foreground">本地工作区</span><Button variant="ghost" size="icon" class="size-7" aria-label="切换上下文面板" @click="contextOpen = !contextOpen"><PanelRight class="size-4" /></Button></div></header>
       <ResizablePanelGroup direction="horizontal" class="min-h-0 flex-1"><ResizablePanel :order="0" :default-size="75" :min-size="45"><main class="h-full min-h-0"><RouterView /></main></ResizablePanel><template v-if="wide && contextOpen"><ResizableHandle with-handle /><ResizablePanel :order="1" :default-size="25" :min-size="20" :max-size="40"><ContextPanel /></ResizablePanel></template></ResizablePanelGroup>
     </SidebarInset>
     <NewModDialog v-model:open="createOpen" />
