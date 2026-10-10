@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { modService, nativeCall } from "@/services/native";
 import type { SkillView } from "@/contracts/skill";
 import { useProjectsStore } from "@/stores/projects";
@@ -40,12 +41,49 @@ async function create(): Promise<void> {
 }
 </script>
 <template>
-  <Dialog v-model:open="open"><DialogContent @interact-outside="busy && $event.preventDefault()" @escape-key-down="busy && $event.preventDefault()"><DialogHeader><DialogTitle>新建 MOD</DialogTitle><DialogDescription>源码与每次交付会保存在独立的本地项目目录。</DialogDescription></DialogHeader>
-    <form class="space-y-4" @submit.prevent="create">
-      <div class="space-y-2"><label for="mod-name" class="text-sm font-medium">项目名称</label><Input id="mod-name" v-model="name" maxlength="120" required autofocus :disabled="busy" placeholder="例如：仓库信息面板" /></div>
-      <div class="space-y-2"><label class="text-sm font-medium" for="game-skill">游戏能力</label><select id="game-skill" v-model="gameSkill" class="h-9 w-full rounded-md border bg-background px-3 text-sm" :disabled="busy"><option v-for="game in games" :key="game.name" :value="game.name">{{ game.name }} · {{ game.description }}</option></select><p class="text-xs text-muted-foreground">无需安装游戏即可开始开发。</p></div>
-      <div class="space-y-2"><label for="mod-requirement" class="text-sm font-medium">你想做什么？</label><Textarea id="mod-requirement" v-model="requirement" :disabled="busy" rows="5" placeholder="描述希望改变的行为、界面或规则…" /></div>
-      <p v-if="error" role="alert" class="text-sm text-destructive">{{ error }}</p><div class="flex justify-end"><Button type="submit" :disabled="busy || !name.trim() || !gameSkill">{{ busy ? '正在创建…' : '创建项目' }}</Button></div>
-    </form>
-  </DialogContent></Dialog>
+  <Dialog v-model:open="open">
+    <DialogContent class="flex max-h-[calc(100dvh-2rem)] flex-col gap-6 sm:max-w-xl" @interact-outside="busy && $event.preventDefault()" @escape-key-down="busy && $event.preventDefault()">
+      <DialogHeader class="shrink-0 gap-2 pr-6">
+        <DialogTitle>新建 MOD</DialogTitle>
+        <DialogDescription class="leading-6">源码与每次交付会保存在独立的本地项目目录。</DialogDescription>
+      </DialogHeader>
+      <form class="flex min-h-0 flex-col gap-5" @submit.prevent="create">
+        <div class="min-h-0 space-y-5 overflow-y-auto px-1 pb-1">
+          <div class="grid gap-2">
+            <label for="mod-name" class="text-sm font-medium">项目名称</label>
+            <Input id="mod-name" v-model="name" class="h-10" maxlength="120" required autofocus :disabled="busy" placeholder="例如：仓库信息面板" />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium" for="game-skill">游戏能力</label>
+            <Select v-model="gameSkill" :disabled="busy">
+              <SelectTrigger id="game-skill" class="w-full min-w-0 data-[size=default]:h-10" aria-describedby="game-skill-help">
+                <SelectValue placeholder="请选择游戏能力"><span class="truncate">{{ gameSkill }}</span></SelectValue>
+              </SelectTrigger>
+              <SelectContent align="start" class="w-(--reka-select-trigger-width)">
+                <SelectItem v-for="game in games" :key="game.name" :value="game.name" :text-value="game.name" class="items-start py-3 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1">
+                  <div class="min-w-0 space-y-1 whitespace-normal">
+                    <p class="break-all font-medium">{{ game.name }}</p>
+                    <p class="break-words text-xs leading-5 text-muted-foreground">{{ game.description }}</p>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p id="game-skill-help" class="text-xs leading-5 text-muted-foreground">无需安装游戏即可开始开发。</p>
+          </div>
+          <div class="grid gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <label for="mod-requirement" class="text-sm font-medium">你想做什么？</label>
+              <span class="text-xs text-muted-foreground">选填</span>
+            </div>
+            <Textarea id="mod-requirement" v-model="requirement" class="min-h-32 resize-y leading-6" :disabled="busy" rows="4" placeholder="描述希望改变的行为、界面或规则…" />
+          </div>
+          <p v-if="error" role="alert" class="break-words text-sm text-destructive">{{ error }}</p>
+        </div>
+        <div class="flex shrink-0 justify-end gap-2 border-t pt-4">
+          <Button type="button" variant="outline" :disabled="busy" @click="open = false">取消</Button>
+          <Button type="submit" :disabled="busy || !name.trim() || !gameSkill">{{ busy ? '正在创建…' : '创建项目' }}</Button>
+        </div>
+      </form>
+    </DialogContent>
+  </Dialog>
 </template>
