@@ -4,6 +4,7 @@ import { Check, Copy } from "@lucide/vue";
 import type { ChatMessage, ToolRun } from "@/contracts/session";
 import MessageParts from "./MessageParts.vue";
 import RoundActivity from "./RoundActivity.vue";
+import ChatImage from "./ChatImage.vue";
 import { conversationRounds } from "./conversationRounds";
 import type { TaskRecord } from "@/contracts/task";
 const props = defineProps<{ messages: ChatMessage[]; tools: Record<string, ToolRun>; modId: string; tasks: TaskRecord[]; working: boolean; startedAt?: number; endedAt?: number; activity: string; lastActivityAt: number }>();
@@ -62,7 +63,7 @@ watch(() => [props.messages, props.working], async () => {
     <section v-for="round in rounds" :key="round.id" class="space-y-4">
       <article v-if="round.user" class="ml-auto max-w-[85%] space-y-2">
         <div v-if="round.user.parts.some(part => part.type === 'image')" class="flex flex-wrap justify-end gap-2">
-          <img v-for="(image, index) in round.user.parts.filter(part => part.type === 'image')" :key="`${round.user.id}-image-${index}`" :src="`data:${image.mimeType};base64,${image.data}`" :alt="`会话图片附件 ${index + 1}`" class="size-20 rounded-xl border bg-muted object-cover" loading="lazy" />
+          <ChatImage v-for="(image, index) in round.user.parts.filter(part => part.type === 'image')" :key="`${round.user.id}-image-${index}`" :image="image" :alt="`会话图片附件 ${index + 1}`" />
         </div>
         <div v-if="round.user.parts.some(part => part.type === 'text' && part.text.trim()) || round.user.error" class="rounded-xl bg-muted px-3 py-2">
           <MessageParts :message="{ ...round.user, parts: round.user.parts.filter(part => part.type !== 'image') }" :tools="tools" :mod-id="modId" />
@@ -70,7 +71,7 @@ watch(() => [props.messages, props.working], async () => {
         <p v-if="!round.user.final" role="status" class="text-right text-xs text-muted-foreground">{{ round.user.inputStatus === 'unknown' ? '提交状态未确认，请检查历史，勿重复发送' : round.user.inputStatus === 'failed' ? '提交失败' : '正在提交…' }}</p>
       </article>
       <article v-for="input in round.supplements" :key="input.id" class="ml-auto max-w-[85%] space-y-2">
-        <div class="flex flex-wrap justify-end gap-2"><img v-for="(part,index) in input.parts.filter(part => part.type === 'image')" :key="index" :src="'data:' + part.mimeType + ';base64,' + part.data" alt="引导图片" class="size-20 rounded-xl border object-cover" /></div>
+        <div class="flex flex-wrap justify-end gap-2"><ChatImage v-for="(part,index) in input.parts.filter(part => part.type === 'image')" :key="index" :image="part" :alt="`引导图片 ${index + 1}`" /></div>
         <div class="rounded-xl bg-muted px-3 py-2"><MessageParts :message="{...input,parts:input.parts.filter(part => part.type !== 'image')}" :tools="tools" :mod-id="modId" /></div>
         <p class="text-right text-xs text-muted-foreground">{{ input.inputStatus === 'confirmed' ? '补充要求已进入会话' : input.inputStatus === 'handled' ? '补充要求由扩展接收' : input.inputStatus === 'unknown' ? '状态未确认，请检查历史' : ['failed', 'rejected'].includes(input.inputStatus ?? '') ? '补充要求提交失败' : '补充要求已提交，等待处理' }}</p>
       </article>
