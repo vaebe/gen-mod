@@ -2,6 +2,8 @@
 
 日期：2026-10-09。项目：`D:\codetest\gen-mod`。
 
+> 历史设计：本文保留首期方案与当时基线。2026-10-10 当前实现已支持多会话并发、运行中引导和 SQLite；安装采用直接覆盖，不备份或自动回退。最新交互与限制以 [当前项目上下文](./project-context.md) 为准，并结合 [多会话计划](./2026-10-09-multi-session-steering-plan.md) 阅读，本文的单任务、JSON 活动元数据及备份回退描述不再代表当前实现。
+
 本文补齐 pi 接入、skills 扩展、模型配置、UI 与回复渲染的方案，供后续开发审查。用户已确认 Vue、通过 skills 扩展游戏能力、优先逃离鸭科夫、指定模型端点并使用 OpenAI Responses API、采用 shadcn-vue + Tailwind CSS、参考 Codex 桌面版最新布局，以及稳定 MOD 目录和按钮安装管理。开发不要求用户安装游戏，游戏规则通过 skills 组织，游戏内测试验证由用户负责；API Key 通过 env 文件配置。Step Plan 支持 Responses 由用户明确确认。编写本文不代表授权安装依赖、修改实现、部署或提交。
 
 ## 1. 当前项目与总体选择

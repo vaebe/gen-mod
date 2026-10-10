@@ -12,6 +12,15 @@ const following = shallowRef(true);
 const scroll = useTemplateRef<HTMLElement>("scroll");
 const content = useTemplateRef<HTMLElement>("content");
 const processId = useId();
+const thinkingScroll = useTemplateRef<HTMLElement>("thinkingScroll");
+const thinkingFollowing = shallowRef(true);
+const activeThinking = computed(() => {
+  if (!props.round.running) { return; }
+  const message = props.round.process[props.round.process.length - 1];
+  if (message && !message.final && !message.error && message.activeThinking !== undefined) {
+    return { id: message.id, text: message.activeThinking };
+  }
+});
 let resizeObserver: ResizeObserver | undefined;
 const processMessages = computed(() => props.round.process.filter(message => message.error || message.stopReason === "aborted" || message.parts.some(part => part.type === "tool" || (part.type === "text" && part.text.trim()))));
 const stopped = computed(() => props.round.status === "cancelled" || props.round.process.some(message => message.stopReason === "aborted"));
@@ -31,7 +40,17 @@ const duration = computed(() => {
   const seconds = Math.max(0, Math.floor((end - start) / 1000));
   return `用时 ${seconds >= 60 ? `${Math.floor(seconds / 60)}分钟 ` : ''}${seconds % 60}秒`;
 });
-const summary = computed(() => props.lastActivityAt && now.value - props.lastActivityAt > 30_000 ? "等待模型或命令返回" : props.activity);
+const summary = computed(() => activeThinking.value ? "正在思考…" : props.lastActivityAt && now.value - props.lastActivityAt > 30_000 ? "等待模型或命令返回" : props.activity);
+function onThinkingScroll(): void {
+  const element = thinkingScroll.value;
+  if (element) { thinkingFollowing.value = element.scrollHeight - element.scrollTop - element.clientHeight < 24; }
+}
+watch(() => activeThinking.value?.id, () => { thinkingFollowing.value = true; });
+watch(() => activeThinking.value?.text, async () => {
+  await nextTick();
+  if (thinkingScroll.value && thinkingFollowing.value) { thinkingScroll.value.scrollTop = thinkingScroll.value.scrollHeight; }
+  scrollToBottom();
+});
 function scrollToBottom(): void {
   if (scroll.value && processOpen.value && following.value) { scroll.value.scrollTop = scroll.value.scrollHeight; }
 }
@@ -50,6 +69,7 @@ onMounted(() => {
     resizeObserver.observe(content.value);
   }
   scrollToBottom();
+  if (thinkingScroll.value) { thinkingScroll.value.scrollTop = thinkingScroll.value.scrollHeight; }
 });
 onBeforeUnmount(() => { resizeObserver?.disconnect(); });
 </script>
@@ -68,7 +88,15 @@ onBeforeUnmount(() => { resizeObserver?.disconnect(); });
       <div ref="scroll" class="process-scroll overflow-y-auto overscroll-contain py-3 pr-2" @scroll.stop="onScroll">
         <div ref="content" class="space-y-3">
           <MessageParts v-for="message in processMessages" :key="message.id" :message="message" :tools="tools" :mod-id="modId" />
-          <p v-if="!processMessages.length" class="text-xs">{{ round.running ? '正在准备，等待模型响应…' : '暂无执行明细。' }}</p>
+          <div v-if="activeThinking?.text.trim()" class="space-y-2">
+            <p role="status" class="flex items-center gap-2 text-xs"><LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />正在思考…</p>
+            <div ref="thinkingScroll" class="max-h-40 overflow-y-auto overscroll-contain whitespace-pre-wrap break-words text-xs leading-5" @scroll.stop="onThinkingScroll">{{ activeThinking.text }}</div>
+          </div>
+          <p v-else-if="round.running && (!processMessages.length || activeThinking)" role="status" class="flex items-center gap-2 text-xs">
+            <LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            <span>{{ summary }}</span>
+          </p>
+          <p v-else-if="!round.running && !processMessages.length" class="text-xs">暂无执行明细。</p>
         </div>
       </div>
       <button v-if="round.running && !following" type="button" class="mt-1 rounded-md px-2 py-1 text-xs hover:bg-muted focus-visible:outline focus-visible:outline-ring" @click="followLatest">回到最新</button>

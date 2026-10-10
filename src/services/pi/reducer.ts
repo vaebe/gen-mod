@@ -53,12 +53,21 @@ export function reduceRecord(state: ChatState, record: PiRecord): ChatState {
     if (normalized) {
       normalized.inputId = confirmedId;
       normalized.taskId = typeof record.taskId === "string" ? record.taskId : undefined;
+      const update = object(record.assistantMessageEvent);
+      if (message.role === "assistant" && record.type === "message_update" && (update.type === "thinking_start" || update.type === "thinking_delta") && typeof update.contentIndex === "number" && Array.isArray(message.content)) {
+        // 使用原始内容索引，只展示当前段，不重复展示之前已经结束的思考。
+        const part = object(message.content[update.contentIndex]);
+        if (part.type === "thinking" && typeof part.thinking === "string") { normalized.activeThinking = part.thinking; }
+      }
       const index = next.messages.findIndex((item) => item.id === id);
       if (index >= 0) { next.messages[index] = normalized; } else { next.messages.push(normalized); }
       if (message.role === "user") { if (confirmedId) { next.pendingInputs = next.pendingInputs?.filter(value => value !== confirmedId); } else { next.pendingUserId = undefined; } }
       next.liveMessageId = record.type === "message_end" ? undefined : id;
     }
   } else if (record.type.startsWith("tool_execution_")) {
+    if (record.type === "tool_execution_start") {
+      next.messages = next.messages.map(message => message.activeThinking !== undefined ? { ...message, activeThinking: undefined } : message);
+    }
     const id = String(record.toolCallId ?? "");
     if (!id) { return next; }
     const previous = next.tools[id];
@@ -70,6 +79,7 @@ export function reduceRecord(state: ChatState, record: PiRecord): ChatState {
     };
   } else if (record.type === "agent_settled") {
     next.liveMessageId = undefined;
+    next.messages = next.messages.map(message => message.activeThinking !== undefined ? { ...message, activeThinking: undefined } : message);
     for (const [id, tool] of Object.entries(next.tools)) {
       if (tool.status === "running" || tool.status === "waiting") {
         next.tools[id] = { ...tool, status: record.aborted ? "cancelled" : "failed" };

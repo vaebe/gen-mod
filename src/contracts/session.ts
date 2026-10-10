@@ -33,6 +33,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   parts: MessagePart[];
+  /** 仅用于实时展示当前思考段；结束事件和历史恢复不保留此状态。 */
+  activeThinking?: string;
   final: boolean;
   error?: string;
   timestamp?: number;

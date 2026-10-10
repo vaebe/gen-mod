@@ -80,10 +80,13 @@ export function createSessionRuntime() {
       lastActivityAt.value = Date.now();
     }
     if (event.kind === "record") {
+      if (record.type === "agent_start" || record.type === "turn_start") { activity.value = "等待模型响应…"; lastActivityAt.value = Date.now(); }
       if (["agent_start", "message_update", "tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(record.type)) { lastActivityAt.value = Date.now(); }
       if (record.type === "message_update") {
         const update = record.assistantMessageEvent as { type?: string } | undefined;
-        activity.value = update?.type?.startsWith("thinking") ? "正在分析需求" : "正在整理回复";
+        if (update?.type === "thinking_start" || update?.type === "thinking_delta") { activity.value = "正在思考…"; }
+        else if (update?.type === "thinking_end" || update?.type === "start") { activity.value = "等待模型响应…"; }
+        else { activity.value = "正在整理回复"; }
       }
       if (record.type === "tool_execution_start") {
         const names: Record<string, string> = { read: "正在读取文件", write: "正在写入源码", edit: "正在修改源码", grep: "正在搜索代码", find: "正在查找文件", ls: "正在查看目录", run_command: "正在执行开发命令", prepare_delivery: "正在整理交付文件" };
