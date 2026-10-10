@@ -7,7 +7,7 @@ import { PopoverRoot, PopoverAnchor, PopoverTrigger, PopoverPortal, PopoverConte
 import ContextUsageIndicator from "./ContextUsageIndicator.vue";
 import type { ContextUsage, PromptAttachment, ThinkingLevel } from "@/contracts/session";
 const requirement = defineModel<string>({ required: true });
-const props = defineProps<{ attachments: PromptAttachment[]; readingAttachments: boolean; working: boolean; canSteer: boolean; stopping: boolean; busy: boolean; saving: boolean; configured: boolean; model: string; error: string; thinkingLevel: ThinkingLevel; thinkingLevels: ThinkingLevel[]; contextUsage?: ContextUsage; compacting: boolean; canCompact: boolean }>();
+const props = defineProps<{ attachments: PromptAttachment[]; readingAttachments: boolean; working: boolean; canSteer: boolean; stopping: boolean; busy: boolean; configured: boolean; model: string; error: string; thinkingLevel: ThinkingLevel; thinkingLevels: ThinkingLevel[]; contextUsage?: ContextUsage; compacting: boolean; canCompact: boolean }>();
 const emit = defineEmits<{ send: []; cancel: []; save: []; thinking: [level: ThinkingLevel]; compact: []; files: [files: File[]]; removeAttachment: [id: string] }>();
 const picker = useTemplateRef<HTMLInputElement>("picker");
 const menuOpen = shallowRef(false);
@@ -19,7 +19,7 @@ const actions = computed(() => [
   { id: "files", label: "选择文件", command: "/file", description: "图片、文本和源码", icon: Paperclip, disabled: props.readingAttachments },
   { id: "compact", label: "压缩", command: "/compact", description: props.busy ? "会话空闲时可使用" : `压缩此聊天的上下文${contextPercent.value !== undefined ? `（已使用 ${contextPercent.value}%）` : ''}`, icon: Shrink, disabled: props.busy || !props.configured || !props.canCompact },
 ].filter(action => !slashMenu.value || `${action.label} ${action.command}`.toLowerCase().includes(slash.value?.[1]?.toLowerCase() ?? "")));
-const canSend = computed(() => (!props.busy || props.canSteer) && !props.saving && !props.readingAttachments && props.configured && (requirement.value.trim() || props.attachments.length));
+const canSend = computed(() => (!props.busy || props.canSteer) && !props.readingAttachments && props.configured && (requirement.value.trim() || props.attachments.length));
 watch(requirement, () => {
   if (slash.value) { slashMenu.value = true; selectedAction.value = 0; menuOpen.value = true; }
   else if (slashMenu.value) { menuOpen.value = false; slashMenu.value = false; }

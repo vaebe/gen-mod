@@ -24,10 +24,11 @@ const loadingProject = shallowRef(true);
 const attachments = computed({ get: () => session.attachments, set: (value: PromptAttachment[]) => { session.attachments = value; } });
 const attachmentError = shallowRef("");
 const readingAttachments = shallowRef(false);
+const sending = shallowRef(false);
 let attachmentGeneration = 0;
 const tasks = shallowRef<TaskRecord[]>([]);
 const draft = useDraft();
-const { requirement, saving, error: saveError } = draft;
+const { requirement, error: saveError } = draft;
 const configuration = useConfiguration();
 const { status } = configuration;
 const session = useSessionStore();
@@ -119,21 +120,34 @@ watch(() => [String(route.params.modId), String(route.query.session ?? ""), Stri
 }, { immediate: true });
 
 async function send(): Promise<void> {
-  if (readingAttachments.value) { return; }
+  if (sending.value || readingAttachments.value || opening.value || (session.busy && !session.canSteer)) { return; }
   const submittingKey = session.selectedKey;
   const target = session.stateFor(session.modId,session.sessionId);
+  if (!target || (!requirement.value.trim() && !attachments.value.length)) { return; }
   const submitted = requirement.value;
-  const clearDraft = draft.captureSubmitted();
   const selected = attachments.value;
   const textFiles = selected.filter(file => file.type === "text").map(file => `附件文件：${file.name}\n${file.text}`).join("\n\n");
   const message = [submitted.trim() || (selected.length ? "请根据附件继续处理当前 MOD。" : ""), textFiles].filter(Boolean).join("\n\n");
   const images = selected.filter(file => file.type === "image").map(file => ({ type: "image" as const, data: file.data, mimeType: file.mimeType }));
+  const previousIds = new Set(target.chat.messages.map(item => item.id));
+  sending.value = true;
+  const submission = draft.captureSubmitted();
+  target.attachments = target.attachments.filter(file => !selected.some(sent => sent.id === file.id));
+  let restore = false;
+  error.value = "";
   try {
-    if (!target) { return; }
-    await target.send(message, images, draft.flush);
-    target.attachments = target.attachments.filter(file => !selected.some(sent => sent.id === file.id));
-    await clearDraft();
-  } catch (cause) { if (session.selectedKey === submittingKey) { error.value = (cause as Error).message; } }
+    await target.send(message, images, submission.save);
+  } catch (cause) {
+    const confirmed = target.chat.messages.some(item => !previousIds.has(item.id) && item.role === "user" && (item.final || (item.inputStatus && !["submitted", "failed", "unknown"].includes(item.inputStatus))));
+    restore = !confirmed && !/超时|未确认/.test((cause as Error).message);
+    if (restore) { target.attachments = [...selected, ...target.attachments.filter(file => !selected.some(sent => sent.id === file.id))]; }
+    if (session.selectedKey === submittingKey) { error.value = (cause as Error).message; }
+  } finally {
+    try {
+      const saved = await submission.finish(restore);
+      if (!saved && !restore && session.selectedKey === submittingKey) { error.value = "消息已提交，草稿保存失败，请勿重复发送"; }
+    } finally { sending.value = false; }
+  }
 }
 
 async function leave(): Promise<boolean> {
@@ -174,6 +188,6 @@ onBeforeRouteUpdate(leave);
       <p v-for="input in session.steeringInputs.filter(input => ['unknown', 'handled', 'submitted', 'queued'].includes(input.status) && !session.chat.messages.some(message => message.inputId === input.inputId))" :key="input.inputId" class="truncate" :title="input.message">补充要求{{ input.status === 'handled' ? '已处理，未关联到正式历史' : '尚未确认执行' }}，不会自动重发：{{ input.message }}</p>
     </div>
     <p v-if="session.readOnly" class="border-t px-5 py-5 text-xs text-muted-foreground">此会话使用旧的能力上下文，只能查看历史。创建新会话继续开发。</p>
-    <ChatComposer v-else-if="project" v-model="requirement" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-steer="session.canSteer" :stopping="session.stopping" :busy="session.busy" :saving="saving" :configured="!!status?.keyConfigured && !opening" :model="status?.model || 'step-5-preview'" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @thinking="session.setThinking" @compact="session.compact" />
+    <ChatComposer v-else-if="project" v-model="requirement" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-steer="session.canSteer && !sending" :stopping="session.stopping" :busy="session.busy || sending" :configured="!!status?.keyConfigured && !opening" :model="status?.model || 'step-5-preview'" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @thinking="session.setThinking" @compact="session.compact" />
   </div>
 </template>

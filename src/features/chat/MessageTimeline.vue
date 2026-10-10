@@ -67,11 +67,12 @@ watch(() => [props.messages, props.working], async () => {
         <div v-if="round.user.parts.some(part => part.type === 'text' && part.text.trim()) || round.user.error" class="rounded-xl bg-muted px-3 py-2">
           <MessageParts :message="{ ...round.user, parts: round.user.parts.filter(part => part.type !== 'image') }" :tools="tools" :mod-id="modId" />
         </div>
+        <p v-if="!round.user.final" role="status" class="text-right text-xs text-muted-foreground">{{ round.user.inputStatus === 'unknown' ? '提交状态未确认，请检查历史，勿重复发送' : round.user.inputStatus === 'failed' ? '提交失败' : '正在提交…' }}</p>
       </article>
       <article v-for="input in round.supplements" :key="input.id" class="ml-auto max-w-[85%] space-y-2">
         <div class="flex flex-wrap justify-end gap-2"><img v-for="(part,index) in input.parts.filter(part => part.type === 'image')" :key="index" :src="'data:' + part.mimeType + ';base64,' + part.data" alt="引导图片" class="size-20 rounded-xl border object-cover" /></div>
         <div class="rounded-xl bg-muted px-3 py-2"><MessageParts :message="{...input,parts:input.parts.filter(part => part.type !== 'image')}" :tools="tools" :mod-id="modId" /></div>
-        <p class="text-right text-xs text-muted-foreground">{{ input.inputStatus === 'confirmed' ? '补充要求已进入会话' : input.inputStatus === 'handled' ? '补充要求由扩展接收' : input.inputStatus === 'unknown' ? '状态未确认，请检查历史' : '补充要求已提交，等待处理' }}</p>
+        <p class="text-right text-xs text-muted-foreground">{{ input.inputStatus === 'confirmed' ? '补充要求已进入会话' : input.inputStatus === 'handled' ? '补充要求由扩展接收' : input.inputStatus === 'unknown' ? '状态未确认，请检查历史' : ['failed', 'rejected'].includes(input.inputStatus ?? '') ? '补充要求提交失败' : '补充要求已提交，等待处理' }}</p>
       </article>
       <RoundActivity :round="round" :tools="tools" :mod-id="modId" :activity="activity" :last-activity-at="lastActivityAt" />
       <p v-if="!round.running && round.status === 'cancelled' && !round.process.some(message => message.stopReason === 'aborted')" class="text-xs text-muted-foreground">已手动停止</p>

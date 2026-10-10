@@ -11,6 +11,7 @@ export function useDraft() {
   let saved = "";
   let sessionId: string | undefined;
   let pending: Promise<boolean> | undefined;
+  let submissionPending: Promise<void> | undefined;
   const revisions = new Map<string, number>();
   let loading = false;
   watch(requirement, () => {
@@ -30,6 +31,7 @@ export function useDraft() {
     error.value = "";
   }
   async function flush(): Promise<boolean> {
+    if (submissionPending) { await submissionPending; return flush(); }
     if (pending) { if (!await pending) { return false; } return flush(); }
     if (!projectId || saved === requirement.value) { return true; }
     const text = requirement.value;
@@ -51,38 +53,54 @@ export function useDraft() {
     if (pending === operation) { pending = undefined; }
     return result && (saved === requirement.value || await flush());
   }
-  function captureSubmitted(): () => Promise<void> {
+  /** 输入立即清空，提交快照独立保存；自动保存等待提交结束后再写入新草稿。 */
+  function captureSubmitted() {
     const id = projectId;
     const targetSession = sessionId;
     const text = requirement.value;
     const key = id + "/" + targetSession;
+    requirement.value = "";
     const revision = revisions.get(key) ?? 0;
-    return () => clearSubmitted(id, targetSession, text, key, revision);
-  }
-  async function clearSubmitted(id: string, targetSession: string | undefined, text: string, key: string, revision: number): Promise<void> {
-    while (pending) {
-      const operation = pending;
-      await operation;
+    let release!: () => void;
+    submissionPending = new Promise<void>(resolve => { release = resolve; });
+    async function save(): Promise<boolean> {
+      while (pending) {
+        const operation = pending;
+        await operation;
+        if (pending === operation) { pending = undefined; }
+      }
+      saving.value = true;
+      const operation = (async () => {
+        try {
+          projects.upsert(await modService.saveDraft(id, text, targetSession));
+          if (id === projectId && targetSession === sessionId) { saved = text; error.value = ""; }
+          return true;
+        } catch (cause) { error.value = (cause as Error).message; return false; }
+        finally { saving.value = false; }
+      })();
+      pending = operation;
+      const result = await operation;
       if (pending === operation) { pending = undefined; }
+      return result;
     }
-    if (!targetSession || (revisions.get(key) ?? 0) !== revision) { return; }
-    if (id === projectId && targetSession === sessionId && requirement.value !== text) { return; }
-    saving.value = true;
-    const operation = (async () => {
+    async function finish(restore: boolean): Promise<boolean> {
       try {
-        projects.upsert(await modService.saveDraft(id, "", targetSession, text));
-        if (id === projectId && targetSession === sessionId && requirement.value === text && (revisions.get(key) ?? 0) === revision) {
-          saved = "";
-          requirement.value = "";
+        const unchanged = id === projectId && targetSession === sessionId && (revisions.get(key) ?? 0) === revision;
+        if (restore && unchanged) { requirement.value = text; }
+        // 清理只匹配本次快照，不覆盖其他来源已写入的草稿。
+        if (!restore && unchanged && targetSession) {
+          saving.value = true;
+          try {
+            projects.upsert(await modService.saveDraft(id, "", targetSession, text));
+            saved = "";
+            error.value = "";
+          } catch (cause) { error.value = (cause as Error).message; return false; }
+          finally { saving.value = false; }
         }
-        return true;
-      } catch (cause) { error.value = (cause as Error).message; return false; }
-      finally { saving.value = false; }
-    })();
-    pending = operation;
-    const result = await operation;
-    if (pending === operation) { pending = undefined; }
-    if (!result) { throw new Error("已发送，草稿清理失败，请勿重复发送"); }
+      } finally { submissionPending = undefined; release(); }
+      return flush();
+    }
+    return { save, finish };
   }
   return { requirement, error, saving, load, flush, captureSubmitted };
 }

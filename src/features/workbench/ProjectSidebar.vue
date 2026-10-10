@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { shallowRef } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Boxes, Folder, FolderOpen, Settings, Sparkles, MoreVertical, Pencil, Trash2 } from "@lucide/vue";
+import { Folder, FolderOpen, Settings, Sparkles, MoreVertical, Pencil, Trash2 } from "@lucide/vue";
 import { useProjectsStore } from "@/stores/projects";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuAction, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarTrigger, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuAction, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton } from "@/components/ui/sidebar";
 import { DropdownMenuRoot, DropdownMenuPortal, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "reka-ui";
 import SessionRunIndicator from "./SessionRunIndicator.vue";
 import SessionManageDialog, { type SessionAction } from "./SessionManageDialog.vue";
@@ -30,23 +30,18 @@ async function createSession(modId: string): Promise<void> {
 
 <template>
   <Sidebar>
-    <SidebarHeader class="px-4 pt-5 pb-4">
-      <div class="flex items-center text-sm font-semibold tracking-wide">
-        <Boxes class="size-5" />GenMod
-      </div>
-      <p class="text-xs text-muted-foreground">把想法变成游戏里的变化</p>
-    </SidebarHeader>
-    <SidebarContent>
-      <SidebarGroup><SidebarMenu>
+    <SidebarContent class="gap-0">
+      <SidebarGroup class="pb-1"><SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton as-child :is-active="route.path === '/mods'">
+          <SidebarMenuButton as-child class="pr-10" :is-active="route.path === '/mods'">
             <RouterLink to="/mods">
               <Folder />全部项目
             </RouterLink>
           </SidebarMenuButton>
+          <SidebarTrigger class="absolute right-1 top-0.5" aria-label="收起项目导航" title="收起项目导航" />
         </SidebarMenuItem>
       </SidebarMenu></SidebarGroup>
-      <SidebarGroup><SidebarGroupLabel>最近的项目</SidebarGroupLabel>
+      <SidebarGroup class="pt-1"><SidebarGroupLabel class="h-6">最近的项目</SidebarGroupLabel>
         <p v-if="projects.loading" class="px-2 py-3 text-xs text-muted-foreground">正在读取项目…</p>
         <p v-else-if="projects.error" role="alert" class="px-2 py-3 text-xs text-destructive">{{ projects.error }}</p>
         <p v-else-if="!projects.projects.length" class="px-2 py-3 text-xs text-muted-foreground">创建第一个 MOD 后显示在这里</p>

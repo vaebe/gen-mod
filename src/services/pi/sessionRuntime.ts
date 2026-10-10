@@ -254,7 +254,7 @@ export function createSessionRuntime() {
   /** 先显示本地提交，再保存草稿和启动任务；pi 用户事件沿用占位 ID。 */
   async function send(requirement: string, images: ImageInput[] = [], saveDraft?: () => Promise<boolean>): Promise<void> {
     if (readOnly.value) { throw new Error("此会话只能查看历史，请新建会话"); }
-    if (working.value) { await steer(requirement,images); return; }
+    if (working.value) { await steer(requirement,images,saveDraft); return; }
     if (busy.value) { throw new Error("会话暂不能提交，请保留输入"); }
     submitting.value = true;
     stopping.value = false;
@@ -273,7 +273,8 @@ export function createSessionRuntime() {
     } catch (cause) {
       flush();
       if (chat.value.pendingUserId === localId) {
-        chat.value = { ...chat.value, pendingUserId: undefined, messages: chat.value.messages.filter(message => message.id !== localId) };
+        const uncertain = /超时|未确认/.test((cause as Error).message);
+        chat.value = { ...chat.value, pendingUserId: uncertain ? localId : undefined, messages: chat.value.messages.map(message => message.id === localId ? { ...message, inputStatus: uncertain ? "unknown" : "failed", error: (cause as Error).message } : message) };
       }
       error.value = (cause as Error).message;
       throw cause;
@@ -281,20 +282,21 @@ export function createSessionRuntime() {
     finally { submitting.value = false; }
   }
   /** 多条补充各有占位，正式关联由原生队列与内容确认。 */
-  async function steer(message: string, images: ImageInput[]): Promise<void> {
+  async function steer(message: string, images: ImageInput[], saveDraft?: () => Promise<boolean>): Promise<void> {
     if (!canSteer.value || !task.value) { throw new Error("任务暂不能接收引导，请保留输入"); }
     steeringSubmitting.value = true;
     const inputId = crypto.randomUUID();
     flush();
     chat.value = {...chat.value,pendingInputs:[...(chat.value.pendingInputs ?? []),inputId],messages:[...chat.value.messages,{id:inputId,inputId,taskId:task.value.taskId,role:"user",parts:[{type:"text",text:message},...images],final:false,timestamp:Date.now(),inputStatus:"submitted"}]};
     try {
+      if (saveDraft && !await saveDraft()) { throw new Error("需求保存失败，请重试"); }
       const result = await client.steer(task.value.taskId,inputId,message,images);
       chat.value = {...chat.value,messages:chat.value.messages.map(value => value.id===inputId ? {...value,inputStatus:String(result.data?.disposition ?? "unknown")} : value)};
       activity.value = "补充要求已提交";
       await refreshInputs();
     } catch (cause) {
       const uncertain = String((cause as Error).message).includes("未确认");
-      chat.value = {...chat.value,pendingInputs:chat.value.pendingInputs?.filter(id => id!==inputId),messages:uncertain ? chat.value.messages.map(value => value.id===inputId ? {...value,inputStatus:"unknown"} : value) : chat.value.messages.filter(value => value.id!==inputId)};
+      chat.value = {...chat.value,pendingInputs:chat.value.pendingInputs?.filter(id => id!==inputId),messages:chat.value.messages.map(value => value.id===inputId && !value.final && !["confirmed", "handled", "queued", "started"].includes(value.inputStatus ?? "") ? {...value,inputStatus:uncertain ? "unknown" : "failed",error:(cause as Error).message} : value)};
       error.value = (cause as Error).message;
       throw cause;
     } finally { steeringSubmitting.value = false; }
