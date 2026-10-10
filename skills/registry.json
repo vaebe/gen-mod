@@ -1,4 +1,4 @@
 [
   { "name": "mod-workflow", "description": "开发游戏 MOD 时使用的通用命令、文件交付与版本规范", "category": "common", "gameId": null, "version": "1.0.0", "dependencies": [], "path": "common/mod-workflow", "excludePaths": [".delivery", "build"] },
-  { "name": "duckov-mod", "description": "为逃离鸭科夫开发 C# MOD、准备参考程序集并编译交付", "category": "game", "gameId": "duckov", "version": "1.0.0", "dependencies": ["mod-workflow"], "path": "games/duckov/duckov-mod", "excludePaths": ["bin", "obj"], "requiredCommandScripts": ["scripts/build.ps1"] }
+  { "name": "duckov-mod", "description": "为逃离鸭科夫开发和排查 C# MOD，查证游戏 API，处理物品、角色、UI、资源与 Harmony，并编译交付", "category": "game", "gameId": "duckov", "version": "1.1.0", "dependencies": ["mod-workflow"], "path": "games/duckov/duckov-mod", "excludePaths": ["bin", "obj"], "requiredCommandScripts": ["scripts/build.ps1"] }
 ]
