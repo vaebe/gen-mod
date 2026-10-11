@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GenMod 项目架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1240,
+      680
+    ]
+  },
+  "components": [
+    {
+      "id": "workbench",
+      "type": "frontend",
+      "label": "Vue 工作台",
+      "sublabel": "页面 · Pinia · 会话运行状态",
+      "pos": [
+        40,
+        290
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "native",
+      "type": "backend",
+      "label": "Tauri / Rust",
+      "sublabel": "IPC · 任务 · 进程与租约管理",
+      "pos": [
+        350,
+        290
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "pi AI 运行时",
+      "sublabel": "内置 Node · 独立会话进程",
+      "pos": [
+        660,
+        290
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "model",
+      "type": "external",
+      "label": "模型服务",
+      "sublabel": "用户配置 provider 与模型",
+      "pos": [
+        970,
+        290
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "metadata",
+      "type": "database",
+      "label": "本地元数据",
+      "sublabel": "SQLite · 独立模型配置文件",
+      "pos": [
+        350,
+        70
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "skills",
+      "type": "backend",
+      "label": "Skills 能力包",
+      "sublabel": "通用工作流 · 游戏资料与脚本",
+      "pos": [
+        660,
+        70
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "install",
+      "type": "backend",
+      "label": "原生安装器",
+      "sublabel": "预览确认后复制到目标目录",
+      "pos": [
+        40,
+        510
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "versions",
+      "type": "database",
+      "label": "版本产物",
+      "sublabel": "files · 清单 · ZIP · 哈希",
+      "pos": [
+        350,
+        510
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "工具扩展",
+      "sublabel": "文件操作 · 命令 · 准备交付",
+      "pos": [
+        660,
+        510
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "source",
+      "type": "database",
+      "label": "项目文件",
+      "sublabel": "共享 source · 任务全文日志",
+      "pos": [
+        970,
+        510
+      ],
+      "size": [
+        210,
+        76
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "workbench",
+      "to": "native",
+      "label": "Tauri IPC",
+      "variant": "emphasis"
+    },
+    {
+      "from": "native",
+      "to": "agent",
+      "label": "JSONL RPC",
+      "variant": "emphasis"
+    },
+    {
+      "from": "agent",
+      "to": "model",
+      "label": "模型 API",
+      "variant": "emphasis"
+    },
+    {
+      "from": "native",
+      "to": "metadata",
+      "label": "读写"
+    },
+    {
+      "from": "skills",
+      "to": "agent",
+      "label": "按依赖加载",
+      "labelDy": 70
+    },
+    {
+      "from": "native",
+      "to": "versions",
+      "label": "校验登记",
+      "labelDy": 70
+    },
+    {
+      "from": "agent",
+      "to": "tools",
+      "label": "工具调用",
+      "labelDy": 70
+    },
+    {
+      "from": "tools",
+      "to": "source",
+      "label": "租约内操作"
+    },
+    {
+      "from": "versions",
+      "to": "install",
+      "label": "读取版本"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "多会话协作",
+      "items": [
+        "会话状态与页面生命周期分离",
+        "同项目共享源码，原生租约协调读写"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "交付依据",
+      "items": [
+        "工具准备 staging 后请求 Rust 登记",
+        "核对命令回执、源码 revision 与 ZIP 内容"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "安装边界",
+      "items": [
+        "用户确认后复制覆盖，不自动备份回退",
+        "版本生成与游戏内效果验收分离"
+      ]
+    }
+  ]
+}

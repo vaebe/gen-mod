@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\codetest\\gen-mod\\docs\\architecture\\gen-mod.architecture.json",
+  "output": "D:\\codetest\\gen-mod\\docs\\architecture\\gen-mod.html",
+  "specification": {
+    "sha256": "c885e00d944550d302a6bad46952110ce81018f58c78e7dd7edd091e8b214dce",
+    "bytes": 4551
+  },
+  "artifact": {
+    "sha256": "ec26bf8f8764fe4f170c55ef487e0285160ae5c6cf5bb5d318495f08ba298616",
+    "bytes": 713319
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}
