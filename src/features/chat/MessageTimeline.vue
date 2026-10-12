@@ -71,6 +71,15 @@ function onScroll(): void {
     following.value = element.scrollHeight - element.scrollTop - element.clientHeight < 80
   }
 }
+// 本地发送新消息或补充要求时恢复贴底；流式回复仍尊重用户上翻的位置。
+watch(() => props.messages.filter(message => message.role === 'user').at(-1)?.id, async (id, previousId) => {
+  if (!id || id === previousId) {
+    return
+  }
+  await nextTick()
+  following.value = true
+  scrollToBottom()
+})
 watch(() => [props.messages, props.working], async () => {
   if (!following.value) {
     return

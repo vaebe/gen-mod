@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PanelRight } from '@lucide/vue'
-import { useMediaQuery } from '@vueuse/core'
-import { computed, onMounted, shallowRef } from 'vue'
+import { useElementSize, useMediaQuery } from '@vueuse/core'
+import { computed, onMounted, shallowRef, useTemplateRef } from 'vue'
 import { useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -18,6 +18,9 @@ const projects = useProjectsStore()
 const session = useSessionStore()
 const contextOpen = shallowRef(false)
 const wide = useMediaQuery('(min-width: 1100px)')
+const contextContainer = useTemplateRef<HTMLDivElement>('contextContainer')
+const { width: contextContainerWidth } = useElementSize(contextContainer)
+const contextMaxSize = computed(() => Math.max(500, contextContainerWidth.value * 0.8))
 /** 后台会话持续存在，面板只属于当前路由已选中的会话。 */
 const hasContext = computed(() => {
   const modId = String(route.params.modId ?? '')
@@ -43,26 +46,28 @@ onMounted(() => {
     <ProjectSidebar />
     <SidebarInset class="min-h-0 overflow-hidden [@media(max-width:768px)]:pl-12 md:peer-data-[state=collapsed]:pl-12">
       <SidebarTrigger class="absolute left-3 top-3 z-10 hidden [@media(max-width:768px)]:flex group-has-[[data-slot=sidebar][data-state=collapsed]]/sidebar-wrapper:flex" aria-label="展开项目导航" title="展开项目导航" />
-      <ResizablePanelGroup direction="horizontal" class="min-h-0 flex-1">
-        <ResizablePanel :order="0" :default-size="75" :min-size="45">
-          <div class="relative h-full min-h-0">
-            <Button v-if="hasContext" variant="ghost" size="icon" class="absolute right-3 top-3 z-10 size-7 bg-background/90 shadow-sm backdrop-blur-sm" :aria-label="contextVisible ? '收起项目上下文' : '展开项目上下文'" :title="contextVisible ? '收起项目上下文' : '展开项目上下文'" :aria-expanded="contextVisible" @click="contextOpen = !contextOpen">
-              <PanelRight class="size-4" />
-            </Button>
-            <RouterView />
-          </div>
-        </ResizablePanel>
-        <template v-if="wide && contextVisible">
-          <ResizableHandle with-handle />
-          <ResizablePanel :order="1" :default-size="25" :min-size="20" :max-size="40">
-            <ContextPanel :key="session.selectedKey" />
+      <div ref="contextContainer" class="flex min-h-0 flex-1">
+        <ResizablePanelGroup direction="horizontal" class="min-h-0 flex-1">
+          <ResizablePanel :order="0" :default-size="75" :min-size="20">
+            <div class="relative h-full min-h-0">
+              <Button v-if="hasContext" variant="ghost" size="icon" class="absolute right-3 top-3 z-10 size-7 bg-background/90 shadow-sm backdrop-blur-sm" :aria-label="contextVisible ? '收起项目上下文' : '展开项目上下文'" :title="contextVisible ? '收起项目上下文' : '展开项目上下文'" :aria-expanded="contextVisible" @click="contextOpen = !contextOpen">
+                <PanelRight class="size-4" />
+              </Button>
+              <RouterView />
+            </div>
           </ResizablePanel>
-        </template>
-      </ResizablePanelGroup>
+          <template v-if="wide && contextVisible">
+            <ResizableHandle with-handle />
+            <ResizablePanel :order="1" size-unit="px" :default-size="500" :min-size="300" :max-size="contextMaxSize">
+              <ContextPanel :key="session.selectedKey" />
+            </ResizablePanel>
+          </template>
+        </ResizablePanelGroup>
+      </div>
     </SidebarInset>
     <ExtensionDialog />
     <Sheet v-if="!wide && hasContext" v-model:open="contextVisible">
-      <SheetContent class="flex flex-col p-0">
+      <SheetContent class="flex w-[500px] min-w-[300px] flex-col p-0 sm:max-w-none">
         <SheetHeader class="p-4">
           <SheetTitle>上下文</SheetTitle><SheetDescription>文件、命令日志与交付产物</SheetDescription>
         </SheetHeader><ContextPanel :key="session.selectedKey" />

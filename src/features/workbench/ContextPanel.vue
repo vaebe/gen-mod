@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import type { FileChange, FileDiff as FileDiffData } from '@/contracts/changes'
 import type { ModProject } from '@/contracts/mod'
+import type { VersionAction } from '@/features/mods/VersionActions.vue'
 import { useIntervalFn } from '@vueuse/core'
 import { computed, shallowRef, watch } from 'vue'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import ArtifactPanel from '@/features/mods/ArtifactPanel.vue'
+import InstallDialog from '@/features/mods/InstallDialog.vue'
+import VersionActions from '@/features/mods/VersionActions.vue'
 import { nativeCall } from '@/services/native'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
@@ -28,6 +31,99 @@ const artifactProject = computed(() => projects.projects.find(item => item.modId
 const artifactVersionId = shallowRef('')
 const artifactDetailsOpen = shallowRef(false)
 const selectedArtifact = computed(() => artifactProject.value?.versions.find(version => version.versionId === artifactVersionId.value))
+const artifactBusy = shallowRef(false)
+const artifactInstalling = shallowRef(false)
+const artifactDeleting = shallowRef(false)
+const artifactError = shallowRef('')
+const artifactNotice = shallowRef('')
+const previousTarget = computed(() => artifactProject.value?.lastDeploymentDirectory ?? artifactProject.value?.installations.at(-1)?.targetDirectory)
+const artifactActionsBusy = computed(() => artifactBusy.value || artifactInstalling.value || artifactDeleting.value)
+async function refreshArtifacts(): Promise<void> {
+  const modId = session.modId
+  try {
+    const result = await nativeCall<ModProject>('get_mod', { modId })
+    if (modId === session.modId) {
+      projects.upsert(result)
+    }
+  }
+  catch (cause) {
+    if (modId === session.modId) {
+      artifactError.value = (cause as Error).message
+    }
+  }
+}
+function rememberTarget(directory: string): void {
+  if (artifactProject.value) {
+    projects.upsert({ ...artifactProject.value, lastDeploymentDirectory: directory })
+  }
+}
+async function artifactAction(kind: VersionAction, id: string): Promise<void> {
+  const modId = session.modId
+  if (artifactActionsBusy.value || !artifactProject.value?.versions.some(version => version.versionId === id)) {
+    return
+  }
+  artifactVersionId.value = id
+  artifactError.value = ''
+  artifactNotice.value = ''
+  if (kind === 'details') {
+    viewArtifact(id)
+    return
+  }
+  if (kind === 'install') {
+    artifactInstalling.value = true
+    return
+  }
+  if (kind === 'delete') {
+    artifactDeleting.value = true
+    return
+  }
+  artifactBusy.value = true
+  try {
+    if (kind === 'export') {
+      const path = await nativeCall<string | null>('export_version', { modId, versionId: id })
+      if (modId === session.modId && path) {
+        artifactNotice.value = `已导出：${path}`
+      }
+    }
+    else {
+      await nativeCall('open_mod_directory', { modId, versionId: id })
+    }
+  }
+  catch (cause) {
+    if (modId === session.modId) {
+      artifactError.value = (cause as Error).message
+    }
+  }
+  finally { artifactBusy.value = false }
+}
+async function deleteArtifact(): Promise<void> {
+  if (!selectedArtifact.value || artifactBusy.value) {
+    return
+  }
+  const modId = session.modId
+  const versionId = selectedArtifact.value.versionId
+  artifactBusy.value = true
+  try {
+    const result = await nativeCall<ModProject>('delete_version', { modId, versionId })
+    projects.upsert(result)
+    if (modId === session.modId) {
+      artifactVersionId.value = ''
+      artifactDetailsOpen.value = false
+      artifactNotice.value = '版本已删除，已部署文件和安装记录保留。'
+      session.artifactRevision += 1
+    }
+  }
+  catch (cause) {
+    if (modId === session.modId) {
+      artifactError.value = (cause as Error).message
+      await refreshArtifacts()
+    }
+  }
+  finally {
+    artifactDeleting.value = false
+    artifactBusy.value = false
+  }
+}
 function viewArtifact(id: string): void {
   artifactVersionId.value = id
   artifactDetailsOpen.value = true
@@ -35,6 +131,10 @@ function viewArtifact(id: string): void {
 watch(() => session.modId, () => {
   artifactVersionId.value = ''
   artifactDetailsOpen.value = false
+  artifactInstalling.value = false
+  artifactDeleting.value = false
+  artifactError.value = ''
+  artifactNotice.value = ''
 })
 // 与版本管理页一致，只标记目标当前确认已安装的版本。
 const installedVersionIds = computed(() => new Set(artifactProject.value?.installedTargets.flatMap(target => target.state === 'known' && target.versionId ? [target.versionId] : []) ?? []))
@@ -247,13 +347,46 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
           <p v-if="!artifactProject?.versions.length" class="p-3 text-xs leading-6 text-muted-foreground">
             尚无成功交付版本。
           </p>
-          <Button v-for="version in [...(artifactProject?.versions ?? [])].reverse()" :key="version.versionId" type="button" variant="ghost" class="h-auto w-full flex-col items-stretch whitespace-normal rounded-none border-b p-3 text-left" :aria-label="`查看版本 ${version.versionId.slice(0, 8)} 的详情`" :title="`查看版本 ${version.versionId} 的详情`" @click="viewArtifact(version.versionId)">
-            <span class="flex flex-wrap items-center justify-between gap-2"><span class="font-mono">{{ version.versionId.slice(0, 8) }}</span><Badge v-if="installedVersionIds.has(version.versionId)" variant="outline">当前安装</Badge></span>
-            <span class="mt-2 block text-muted-foreground">{{ version.files.length }} 个文件 · {{ new Date(version.createdAt).toLocaleString() }}</span>
-          </Button>
+          <p v-if="artifactError" role="alert" class="p-3 text-xs text-destructive">
+            {{ artifactError }}
+          </p>
+          <p v-if="artifactNotice" role="status" class="p-3 text-xs">
+            {{ artifactNotice }}
+          </p>
+          <div v-for="version in [...(artifactProject?.versions ?? [])].reverse()" :key="version.versionId" class="flex flex-col gap-2 border-b p-3 text-sm">
+            <div class="flex items-center justify-between gap-2">
+              <span class="min-w-0 font-mono" :class="{ 'text-green-600': installedVersionIds.has(version.versionId), 'text-blue-600': !installedVersionIds.has(version.versionId) && artifactProject?.latestVersionId === version.versionId }" :title="version.versionId">
+                {{ version.versionId.slice(0, 8) }}
+                <span v-if="installedVersionIds.has(version.versionId)" class="sr-only">当前安装</span>
+              </span>
+              <VersionActions :version-id="version.versionId" :busy="artifactActionsBusy" @action="artifactAction" />
+            </div>
+            <p class="text-muted-foreground">
+              {{ version.files.length }} 个文件
+            </p>
+            <p class="text-muted-foreground">
+              {{ new Date(version.createdAt).toLocaleString() }}
+            </p>
+          </div>
         </div>
       </TabsContent>
     </Tabs>
     <ArtifactPanel v-if="selectedArtifact" v-model:open="artifactDetailsOpen" :version="selectedArtifact" />
+    <InstallDialog v-if="selectedArtifact && artifactProject" v-model:open="artifactInstalling" :mod-id="artifactProject.modId" :version-id="selectedArtifact.versionId" :previous-target="previousTarget" @target-selected="rememberTarget" @installed="refreshArtifacts" />
+    <Dialog :open="artifactDeleting" @update:open="value => !artifactBusy && (artifactDeleting = value)">
+      <DialogContent @interact-outside="artifactBusy && $event.preventDefault()" @escape-key-down="artifactBusy && $event.preventDefault()">
+        <DialogHeader><DialogTitle>删除版本 {{ artifactVersionId.slice(0, 8) }}</DialogTitle><DialogDescription>删除应用内的版本文件和 ZIP，无法撤销。已部署到游戏目录的文件、源码及安装记录会保留。</DialogDescription></DialogHeader>
+        <p v-if="installedVersionIds.has(artifactVersionId)" class="text-sm text-muted-foreground">
+          此版本仍有已安装记录；删除后仍可继续使用已部署的文件。
+        </p>
+        <div class="flex justify-end gap-2">
+          <Button variant="ghost" :disabled="artifactBusy" @click="artifactDeleting = false">
+            取消
+          </Button><Button variant="destructive" :disabled="artifactBusy" @click="deleteArtifact">
+            {{ artifactBusy ? '正在删除…' : '删除版本' }}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   </section>
 </template>

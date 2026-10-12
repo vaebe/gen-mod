@@ -4,7 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.99 0.003 85);
+  --background: oklch(1 0 0);
   --foreground: oklch(0.23 0.005 85);
   --card: oklch(1 0 0);
   --card-foreground: var(--foreground);
@@ -12,18 +12,18 @@
   --popover-foreground: var(--foreground);
   --primary: oklch(0.31 0.012 85);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.95 0.004 85);
+  --secondary: oklch(0.98 0.002 180);
   --secondary-foreground: var(--foreground);
-  --muted: oklch(0.96 0.004 85);
+  --muted: oklch(0.975 0.002 180);
   --muted-foreground: oklch(0.5 0.008 85);
-  --accent: oklch(0.94 0.009 85);
+  --accent: oklch(0.96 0.006 180);
   --accent-foreground: var(--foreground);
   --destructive: oklch(0.58 0.21 27);
   --border: oklch(0.9 0.005 85);
   --input: var(--border);
   --ring: oklch(0.56 0.04 145);
   --radius: 0.65rem;
-  --sidebar: oklch(0.965 0.005 85);
+  --sidebar: oklch(0.985 0.006 180);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -99,8 +99,8 @@
     outline-offset: 3px;
   }
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 5px;
+    height: 5px;
   }
   ::-webkit-scrollbar-button {
     display: none;

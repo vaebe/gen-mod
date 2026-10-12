@@ -3,6 +3,7 @@ import type { ConversationRound } from './conversationRounds'
 import type { ToolRun } from '@/contracts/session'
 import { ChevronRight, LoaderCircle } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
+import { useSmoothMarkdownStream } from 'markstream-vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -16,6 +17,8 @@ const scroll = useTemplateRef<HTMLElement>('scroll')
 const content = useTemplateRef<HTMLElement>('content')
 const thinkingScroll = useTemplateRef<HTMLElement>('thinkingScroll')
 const thinkingFollowing = shallowRef(true)
+const thinkingStream = useSmoothMarkdownStream()
+const thinkingText = thinkingStream.visible
 const activeThinking = computed(() => {
   if (!props.round.running) {
     return undefined
@@ -50,7 +53,7 @@ const duration = computed(() => {
     return ''
   }
   const seconds = Math.max(0, Math.floor((end - start) / 1000))
-  return `用时 ${seconds >= 60 ? `${Math.floor(seconds / 60)}分钟 ` : ''}${seconds % 60}秒`
+  return `用时 ${seconds >= 60 ? `${Math.floor(seconds / 60)}分` : ''}${seconds % 60}秒`
 })
 const summary = computed(() => activeThinking.value ? '正在思考…' : props.lastActivityAt && now.value - props.lastActivityAt > 30_000 ? '等待模型或命令返回' : props.activity)
 function onThinkingScroll(): void {
@@ -62,7 +65,17 @@ function onThinkingScroll(): void {
 watch(() => activeThinking.value?.id, () => {
   thinkingFollowing.value = true
 })
-watch(() => activeThinking.value?.text, async () => {
+watch(activeThinking, (thinking, previous) => {
+  if (!thinking) {
+    thinkingStream.reset()
+    return
+  }
+  if (thinking.id !== previous?.id || !thinking.text.startsWith(thinkingStream.source.value)) {
+    thinkingStream.reset()
+  }
+  thinkingStream.enqueue(thinking.text.slice(thinkingStream.source.value.length))
+}, { immediate: true })
+watch(thinkingText, async () => {
   await nextTick()
   if (thinkingScroll.value && thinkingFollowing.value) {
     thinkingScroll.value.scrollTop = thinkingScroll.value.scrollHeight
@@ -107,34 +120,32 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  thinkingStream.pause()
 })
 </script>
 
 <template>
   <Collapsible v-model:open="processOpen" class="text-muted-foreground">
     <CollapsibleTrigger as-child>
-      <Button type="button" variant="ghost" size="sm" class="h-auto w-full flex-wrap justify-start py-2">
+      <Button type="button" variant="ghost" size="sm" :aria-label="`${duration || '执行过程'}，${status}，${processOpen ? '收起' : '展开'}`" class="h-auto w-full flex-wrap justify-start rounded-none border-b border-border/50 px-0 py-2 text-left text-sm font-normal hover:bg-transparent has-[>svg]:px-0">
+        <span>{{ duration || '执行过程' }}</span>
         <ChevronRight class="size-3.5 shrink-0 transition-transform" :class="processOpen && 'rotate-90'" />
-        <LoaderCircle v-if="round.running" class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-        <span :class="failed && 'text-destructive'">{{ status }}</span>
-        <span v-if="duration">· {{ duration }}</span>
-        <span v-if="round.running" role="status" class="min-w-0 flex-1 truncate">{{ summary }}</span>
-        <span v-else class="ml-auto">{{ processOpen ? '收起过程' : '查看过程' }}</span>
+        <span v-if="round.running && !processOpen" role="status" class="flex min-w-0 items-center gap-1.5">
+          <LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          <span class="truncate">{{ summary }}</span>
+        </span>
       </Button>
     </CollapsibleTrigger>
     <CollapsibleContent v-show="processOpen" force-mount>
-      <div ref="scroll" class="process-scroll overflow-y-auto overscroll-contain py-3 pr-2" @scroll.stop="onScroll">
-        <div ref="content" class="space-y-3">
-          <MessageParts v-for="message in processMessages" :key="message.id" :message="message" :tools="tools" :mod-id="modId" />
+      <div ref="scroll" class="process-scroll overflow-y-auto overscroll-contain pt-4 pb-3 pr-2" @scroll.stop="onScroll">
+        <div ref="content" class="space-y-4">
+          <MessageParts v-for="message in processMessages" :key="message.id" class="text-foreground" :message="message" :tools="tools" :mod-id="modId" />
           <div v-if="activeThinking?.text.trim()" class="space-y-2">
-            <p role="status" class="flex items-center gap-2 text-xs">
-              <LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />正在思考…
-            </p>
             <div ref="thinkingScroll" class="max-h-40 overflow-y-auto overscroll-contain whitespace-pre-wrap break-words text-xs leading-5" @scroll.stop="onThinkingScroll">
-              {{ activeThinking.text }}
+              {{ thinkingText }}
             </div>
           </div>
-          <p v-else-if="round.running && (!processMessages.length || activeThinking)" role="status" class="flex items-center gap-2 text-xs">
+          <p v-if="round.running" role="status" class="flex items-center gap-2 text-xs">
             <LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
             <span>{{ summary }}</span>
           </p>

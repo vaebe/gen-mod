@@ -1,23 +1,17 @@
 <script setup lang="ts">
+import type { VersionAction } from './VersionActions.vue'
 import type { ArtifactVersion } from '@/contracts/mod'
-import { Check, Copy, Download, Eye, FolderOpen, MoreHorizontal, PackageCheck, Trash2 } from '@lucide/vue'
+import { Check, Copy } from '@lucide/vue'
 import { computed, onBeforeUnmount, shallowRef } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import VersionActions from './VersionActions.vue'
 
-export type VersionAction = 'details' | 'install' | 'export' | 'open' | 'delete'
+export type { VersionAction } from './VersionActions.vue'
 const props = defineProps<{ versions: ArtifactVersion[], latest?: string, installed: string[], busy: boolean }>()
 defineEmits<{ action: [kind: VersionAction, id: string] }>()
 const versionsNewestFirst = computed(() => [...props.versions].reverse())
-const actions = [
-  { kind: 'details', label: '查看详情', icon: Eye },
-  { kind: 'install', label: '安装此版本', icon: PackageCheck },
-  { kind: 'export', label: '导出 ZIP', icon: Download },
-  { kind: 'open', label: '打开版本目录', icon: FolderOpen },
-  { kind: 'delete', label: '删除版本', icon: Trash2 },
-] as const
 const copiedId = shallowRef('')
 const copyError = shallowRef('')
 let copyTimer: ReturnType<typeof setTimeout> | undefined
@@ -71,23 +65,7 @@ onBeforeUnmount(() => clearTimeout(copyTimer))
             已安装
           </Badge>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <Button variant="ghost" size="icon" class="size-7 justify-self-end" :disabled="busy" :aria-label="`版本 ${version.versionId.slice(0, 8)} 的操作`">
-              <MoreHorizontal class="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" :side-offset="5" class="min-w-40">
-            <DropdownMenuGroup>
-              <template v-for="action in actions" :key="action.kind">
-                <DropdownMenuSeparator v-if="action.kind === 'delete'" />
-                <DropdownMenuItem :disabled="busy" :class="action.kind === 'delete' && 'text-destructive'" @select="$emit('action', action.kind, version.versionId)">
-                  <component :is="action.icon" class="size-4" />{{ action.label }}
-                </DropdownMenuItem>
-              </template>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <VersionActions :version-id="version.versionId" :busy="busy" @action="(kind, id) => $emit('action', kind, id)" />
       </div>
     </div>
   </section>

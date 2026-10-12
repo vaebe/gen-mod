@@ -37,7 +37,7 @@ async function interceptLink(event: MouseEvent, modId: string): Promise<void> {
       <p v-if="part.type === 'text' && message.role === 'user'" class="whitespace-pre-wrap text-sm leading-6">
         {{ part.text }}
       </p>
-      <MarkdownRender v-else-if="part.type === 'text'" class="chat-markdown" mode="chat" :content="part.text" :final="message.final" :custom-markdown-it="markdown" :custom-html-tags="[]" :render-code-blocks-as-pre="true" :show-tooltips="false" />
+      <MarkdownRender v-else-if="part.type === 'text'" class="chat-markdown" mode="chat" :content="part.text" :final="message.final" :smooth-streaming="message.final ? false : 'auto'" :typewriter="!message.final" :fade="!message.final" :custom-markdown-it="markdown" :custom-html-tags="[]" :render-code-blocks-as-pre="true" :show-tooltips="false" />
       <ToolActivity v-else-if="part.type === 'tool' && tools[part.toolCallId]" :tool="tools[part.toolCallId]!" />
     </template>
     <p v-if="message.stopReason === 'aborted'" role="status" class="mt-3 text-xs text-muted-foreground">
