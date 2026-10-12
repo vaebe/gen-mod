@@ -4,6 +4,7 @@ import { shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { nativeCall } from '@/services/native'
 import { useProjectsStore } from '@/stores/projects'
@@ -54,21 +55,28 @@ async function submit(): Promise<void> {
   <Dialog :open="!!action" @update:open="value => !value && !saving && (action = undefined)">
     <DialogContent @interact-outside="saving && $event.preventDefault()" @escape-key-down="saving && $event.preventDefault()">
       <DialogHeader><DialogTitle>{{ action?.kind === 'delete' ? '删除会话' : '重命名会话' }}</DialogTitle><DialogDescription>{{ action?.kind === 'delete' ? '删除会话及对话历史，无法撤销。项目源码、已生成版本和任务日志会保留。' : '修改左侧菜单中显示的会话名称。' }}</DialogDescription></DialogHeader>
-      <form class="space-y-4" @submit.prevent="submit">
-        <p v-if="action?.kind === 'delete'" class="break-words text-sm">
-          {{ action.name }}
-        </p>
-        <Input v-else v-model="name" maxlength="120" required aria-label="会话名称" autofocus :disabled="saving" />
-        <p v-if="error" role="alert" class="text-xs text-destructive">
-          {{ error }}
-        </p>
-        <div class="flex justify-end gap-2">
-          <Button type="button" variant="ghost" :disabled="saving" @click="action = undefined">
-            取消
-          </Button><Button type="submit" :variant="action?.kind === 'delete' ? 'destructive' : 'default'" :disabled="saving || (action?.kind === 'delete' && session.isBusy(action.modId, action.sessionId)) || (action?.kind === 'rename' && !name.trim())">
-            {{ saving ? '处理中…' : action?.kind === 'delete' ? '删除会话' : '保存' }}
-          </Button>
-        </div>
+      <form @submit.prevent="submit">
+        <FieldGroup>
+          <p v-if="action?.kind === 'delete'" class="break-words text-sm">
+            {{ action.name }}
+          </p>
+          <Field v-else :data-disabled="saving">
+            <FieldLabel for="session-name">
+              会话名称
+            </FieldLabel>
+            <Input id="session-name" v-model="name" maxlength="120" required autofocus :disabled="saving" />
+          </Field>
+          <FieldError v-if="error">
+            {{ error }}
+          </FieldError>
+          <div class="flex justify-end gap-2">
+            <Button type="button" variant="ghost" :disabled="saving" @click="action = undefined">
+              取消
+            </Button><Button type="submit" :variant="action?.kind === 'delete' ? 'destructive' : 'default'" :disabled="saving || (action?.kind === 'delete' && session.isBusy(action.modId, action.sessionId)) || (action?.kind === 'rename' && !name.trim())">
+              {{ saving ? '处理中…' : action?.kind === 'delete' ? '删除会话' : '保存' }}
+            </Button>
+          </div>
+        </FieldGroup>
       </form>
     </DialogContent>
   </Dialog>

@@ -3,6 +3,7 @@ import type { SourcePreview } from '@/contracts/source'
 import { FileCode, LoaderCircle } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { nativeCall } from '@/services/native'
 import { highlightSource } from './sourceHighlight'
 
@@ -145,11 +146,15 @@ async function action(kind: 'copy' | 'reveal'): Promise<void> {
         定位
       </Button>
     </div>
-    <div v-if="!path" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-muted-foreground">
-      <FileCode class="size-7 opacity-50" /><p class="text-xs">
-        选择文件查看源码
-      </p>
-    </div>
+    <Empty v-if="!path">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FileCode />
+        </EmptyMedia><EmptyTitle>
+          选择文件查看源码
+        </EmptyTitle>
+      </EmptyHeader>
+    </Empty>
     <p v-else-if="loading" role="status" class="flex items-center gap-2 p-4 text-xs text-muted-foreground">
       <LoaderCircle class="size-3.5 animate-spin" />正在读取文件…
     </p>

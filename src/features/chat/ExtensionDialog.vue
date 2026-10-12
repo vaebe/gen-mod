@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { nativeCall } from '@/services/native'
 import { useSessionStore } from '@/stores/session'
@@ -64,10 +65,17 @@ onBeforeUnmount(() => {
           {{ option }}
         </Button>
       </div>
-      <form v-else-if="session.uiRequest?.method === 'input'" class="space-y-3" @submit.prevent="reply({ value })">
-        <Input v-model="value" :placeholder="String(session.uiRequest.placeholder || '')" autofocus /><Button type="submit">
-          确认
-        </Button>
+      <form v-else-if="session.uiRequest?.method === 'input'" @submit.prevent="reply({ value })">
+        <FieldGroup>
+          <Field>
+            <FieldLabel for="extension-input" class="sr-only">
+              {{ session.uiRequest?.title || '输入内容' }}
+            </FieldLabel>
+            <Input id="extension-input" v-model="value" :placeholder="String(session.uiRequest.placeholder || '')" autofocus />
+          </Field><Button type="submit" class="self-start">
+            确认
+          </Button>
+        </FieldGroup>
       </form>
       <div v-else class="flex justify-end gap-3">
         <Button variant="outline" @click="reply({ confirmed: false })">
@@ -76,9 +84,9 @@ onBeforeUnmount(() => {
           是
         </Button>
       </div>
-      <p v-if="error" role="alert" class="text-xs text-destructive">
+      <FieldError v-if="error">
         {{ error }}
-      </p>
+      </FieldError>
     </DialogContent>
   </Dialog>
 </template>

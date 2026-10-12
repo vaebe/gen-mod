@@ -2,6 +2,8 @@
 import type { ToolRun } from '@/contracts/session'
 import { Check, LoaderCircle, Terminal, X } from '@lucide/vue'
 import { computed } from 'vue'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
 const props = defineProps<{ tool: ToolRun }>()
 const labels = { waiting: '等待执行', running: '执行中', succeeded: '已完成', failed: '失败', cancelled: '已取消' }
@@ -19,11 +21,15 @@ const output = computed(() => {
 </script>
 
 <template>
-  <details class="my-2 text-xs">
-    <summary class="flex cursor-pointer list-none items-center gap-2 py-1 text-muted-foreground">
-      <LoaderCircle v-if="tool.status === 'running'" class="size-3.5 shrink-0 animate-spin" /><X v-else-if="tool.status === 'failed'" class="size-3.5 shrink-0 text-destructive" /><Check v-else-if="tool.status === 'succeeded'" class="size-3.5 shrink-0" /><Terminal v-else class="size-3.5 shrink-0" /><span class="min-w-0 truncate" :title="summary">{{ summary }}</span><span class="ml-auto shrink-0" :class="tool.status === 'failed' ? 'text-destructive' : ''">{{ labels[tool.status] }}</span>
-    </summary><div class="mt-2 space-y-3 rounded-md border bg-muted/30 p-3">
-      <pre class="overflow-auto whitespace-pre-wrap break-all">{{ args }}</pre><pre v-if="output" class="max-h-72 overflow-auto whitespace-pre-wrap break-all">{{ output }}</pre>
-    </div>
-  </details>
+  <Collapsible class="my-2 text-xs">
+    <CollapsibleTrigger as-child>
+      <Button type="button" variant="ghost" size="sm" class="h-auto w-full justify-start py-1">
+        <LoaderCircle v-if="tool.status === 'running'" class="size-3.5 shrink-0 animate-spin" /><X v-else-if="tool.status === 'failed'" class="size-3.5 shrink-0 text-destructive" /><Check v-else-if="tool.status === 'succeeded'" class="size-3.5 shrink-0" /><Terminal v-else class="size-3.5 shrink-0" /><span class="min-w-0 truncate" :title="summary">{{ summary }}</span><span class="ml-auto shrink-0" :class="tool.status === 'failed' ? 'text-destructive' : ''">{{ labels[tool.status] }}</span>
+      </Button>
+    </CollapsibleTrigger><CollapsibleContent>
+      <div class="mt-2 flex flex-col gap-3 rounded-md border bg-muted/30 p-3">
+        <pre class="overflow-auto whitespace-pre-wrap break-all">{{ args }}</pre><pre v-if="output" class="max-h-72 overflow-auto whitespace-pre-wrap break-all">{{ output }}</pre>
+      </div>
+    </CollapsibleContent>
+  </Collapsible>
 </template>

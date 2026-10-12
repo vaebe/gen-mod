@@ -148,3 +148,14 @@
 - 未运行测试、未启动应用、未访问或修改用户应用数据。用户需重新执行 pnpm run dev:app 验收启动；本轮静态检查不等同于启动验收。
 
 - 本次 codegraph sync → codegraph status 均退出 0，返回 [OK] Index is up to date。限定文档 git diff --check 退出 0；未跟踪 repository.rs 的 git diff --no-index --check 无空白错误输出（退出 1 表示存在文件差异），另对该源码和计划逐行空白检查退出 0，0 处问题。
+
+## 2026-10-12 shadcn-vue 组件统一调整
+
+- 根目录 AGENTS.md 新增优先使用已有 shadcn-vue 组件的约定，开发前读取项目 shadcn-vue skill，并核对现有组件和官方文档。
+- 调整聊天、模型设置、MOD 管理、Skills 与工作台共 23 个业务组件：标准控件使用 Select、Checkbox、Switch、Slider；菜单、弹出面板、展开区域使用 DropdownMenu、Popover、Collapsible；互斥选项使用 ToggleGroup。表单、卡片、状态标签、空状态、连接提示、加载图标和普通操作使用对应组件。
+- 补齐 alert、badge、card、checkbox、collapsible、dropdown-menu、empty、field、label、popover、slider、spinner、switch、toggle-group、toggle 共 15 个组件目录；复用现有依赖，没有修改依赖清单或锁文件。
+- 保留配置保存时机、禁用条件、菜单键盘操作和专用源码 / 差异展示；隐藏文件输入、图片放大触发器、源码树行与用量圆环保留专用实现。
+- 上一轮验证：限定上述业务文件与新增 UI 文件的 ESLint 退出 0；`node node_modules/vue-tsc/bin/vue-tsc.js --noEmit -p .tmp-ui-tsconfig.json` 退出 0；`git -c core.safecrlf=false diff --check -- src/features` 退出 0。临时类型检查配置仅用于本次检查，已删除，不能直接复用该路径运行。
+- `codegraph sync`、`codegraph status` 退出 0，索引为最新；索引维护不等同于功能验证。
+- 未运行测试、完整构建或应用界面验证，未提交。界面焦点、弹出层位置和实际交互仍待运行验收。
+- 本次文档同步更新 README、文档入口、项目上下文与本记录；清理本次组件注册表缓存，临时迁移脚本和类型检查配置确认已不存在。保留其他工作区改动、构建产物和运行时备份。

@@ -4,8 +4,9 @@ import { shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { modService, nativeCall } from '@/services/native'
 import { useProjectsStore } from '@/stores/projects'
@@ -56,47 +57,55 @@ async function create(): Promise<void> {
         </DialogDescription>
       </DialogHeader>
       <form class="flex min-h-0 flex-col gap-5" @submit.prevent="create">
-        <div class="min-h-0 space-y-5 overflow-y-auto px-1 pb-1">
-          <div class="grid gap-2">
-            <label for="mod-name" class="text-sm font-medium">项目名称</label>
-            <Input id="mod-name" v-model="name" class="h-10" maxlength="120" required autofocus :disabled="busy" placeholder="例如：仓库信息面板" />
-          </div>
-          <div class="grid gap-2">
-            <label class="text-sm font-medium" for="game-skill">游戏能力</label>
+        <FieldGroup class="min-h-0 gap-5 overflow-y-auto px-1 pb-1">
+          <Field :data-disabled="busy">
+            <FieldLabel for="mod-name">
+              项目名称
+            </FieldLabel>
+            <Input id="mod-name" v-model="name" maxlength="120" required autofocus :disabled="busy" placeholder="例如：仓库信息面板" />
+          </Field>
+          <Field :data-disabled="busy">
+            <FieldLabel for="game-skill">
+              游戏能力
+            </FieldLabel>
             <Select v-model="gameSkill" :disabled="busy">
-              <SelectTrigger id="game-skill" class="w-full min-w-0 data-[size=default]:h-10" aria-describedby="game-skill-help">
+              <SelectTrigger id="game-skill" class="w-full min-w-0" aria-describedby="game-skill-help">
                 <SelectValue placeholder="请选择游戏能力">
                   <span class="truncate">{{ gameSkill }}</span>
                 </SelectValue>
               </SelectTrigger>
               <SelectContent align="start" class="w-(--reka-select-trigger-width)">
-                <SelectItem v-for="game in games" :key="game.name" :value="game.name" :text-value="game.name" class="items-start py-3 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1">
-                  <div class="min-w-0 space-y-1 whitespace-normal">
-                    <p class="break-all font-medium">
-                      {{ game.name }}
-                    </p>
-                    <p class="break-words text-xs leading-5 text-muted-foreground">
-                      {{ game.description }}
-                    </p>
-                  </div>
-                </SelectItem>
+                <SelectGroup>
+                  <SelectItem v-for="game in games" :key="game.name" :value="game.name" :text-value="game.name" class="items-start py-3 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1">
+                    <div class="min-w-0 space-y-1 whitespace-normal">
+                      <p class="break-all font-medium">
+                        {{ game.name }}
+                      </p>
+                      <p class="break-words text-xs leading-5 text-muted-foreground">
+                        {{ game.description }}
+                      </p>
+                    </div>
+                  </SelectItem>
+                </SelectGroup>
               </SelectContent>
             </Select>
-            <p id="game-skill-help" class="text-xs leading-5 text-muted-foreground">
+            <FieldDescription id="game-skill-help">
               无需安装游戏即可开始开发。
-            </p>
-          </div>
-          <div class="grid gap-2">
+            </FieldDescription>
+          </Field>
+          <Field :data-disabled="busy">
             <div class="flex items-center justify-between gap-2">
-              <label for="mod-requirement" class="text-sm font-medium">你想做什么？</label>
+              <FieldLabel for="mod-requirement">
+                你想做什么？
+              </FieldLabel>
               <span class="text-xs text-muted-foreground">选填</span>
             </div>
             <Textarea id="mod-requirement" v-model="requirement" class="min-h-32 resize-y leading-6" :disabled="busy" rows="4" placeholder="描述希望改变的行为、界面或规则…" />
-          </div>
-          <p v-if="error" role="alert" class="break-words text-sm text-destructive">
+          </Field>
+          <FieldError v-if="error" class="break-words">
             {{ error }}
-          </p>
-        </div>
+          </FieldError>
+        </FieldGroup>
         <div class="flex shrink-0 justify-end gap-2 border-t pt-4">
           <Button type="button" variant="outline" :disabled="busy" @click="open = false">
             取消

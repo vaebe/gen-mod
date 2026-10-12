@@ -4,6 +4,8 @@
 
 2026-10-10 更新：下表按当前源码补充验收场景；历史静态证据和安装包仍属于 2026-10-09 的构建，不包含后续多会话、SQLite、源码浏览及今天的交互与运行时修改。本次文档同步未重新构建、检查现有安装包或执行任何场景。
 
+2026-10-12 更新：当前仅生成 NSIS `.exe`，默认构建产物收集到根目录 `build-output/`，压缩配置已改回 LZMA。本次优化的实测安装包使用 zlib；LZMA 配置尚未重新构建。下文 2026-10-09 的证据与产物表保留为历史记录，本次构建信息见末尾更新。
+
 ## 已有静态证据
 
 - 前端限定范围类型检查、三个 pi extension 类型检查与原生库检查通过，详见 implementation-progress.md。
@@ -51,3 +53,28 @@
 打包完成后 `node work/check-release-resources.mjs` 通过：release 清单与当前准备清单一致，17,374 个运行时文件与 13 个 skills 文件的大小及 SHA-256 均匹配。`Get-FileHash -Algorithm SHA256` 记录上述安装程序校验值；资源检查没有解包安装程序，不能替代安装与运行验收。
 
 API Key 缺失不作为实现卡点。安装验收不默认写入真实游戏目录；游戏内启用、兼容性和效果验证由用户负责。
+
+## 2026-10-12：打包优化与当前配置
+
+### 当前构建方式
+
+- 执行 `pnpm prepare:runtime` 后执行 `pnpm build:app`，只生成 Windows x64 NSIS `.exe`，不再生成 MSI。
+- 默认无额外参数的 `pnpm build:app` 成功后，将当前版本安装包复制到根目录 `build-output/`；原始文件保留在 `src-tauri/target/release/bundle/nsis/`。带额外参数时不自动收集，可用 `node scripts/collect-build-artifacts.mjs` 复制上述固定位置的当前版本安装包。
+- NSIS 使用 LZMA。Rust release 使用 Thin LTO、16 个代码生成单元，保留 `opt-level = 3`、`panic = "abort"` 与符号剥离。首次切换编译参数会重编译依赖。
+- Node 资源只分发 `node.exe` 与 LICENSE；pi 排除 source map，保留运行依赖、类型声明和许可证。首次精简时将旧 pi 目录备份到 `work/pi-portable-before-slim-*`。重复准备不重写内容相同的扩展、helper 与资源清单。
+
+### 已有构建与检查结果
+
+以下数据来自改回 LZMA 之前的 zlib 构建，不代表当前 LZMA 配置的时间或体积。
+
+- `node node_modules/@tauri-apps/cli/tauri.js build -- --timings`：退出 0，总耗时 425.63 秒（约 7 分 6 秒），其中 Rust 约 226 秒，NSIS 约 174 秒。此次包含切换 Rust 参数后的依赖重编译；原先约半小时的观察来自进程与产物时间戳，缓存和系统负载不同，不能视为严格同条件对比。
+- 打包资源从 17,393 个文件、约 211.80 MiB 减到 11,291 个文件、约 169.93 MiB。`node work/check-release-resources.mjs` 通过，release 资源与清单的大小及 SHA-256 匹配；未解包安装程序。
+- 重复准备时核对 11,274 个路径，修改时间变化为 0。新增构建与收集脚本的 `node --check` 通过；实际执行收集脚本后，副本与原安装包的 SHA-256 相同。构建包装脚本尚未通过一次新的完整 `pnpm build:app` 验证。
+
+| zlib 构建产物 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `src-tauri/target/release/bundle/nsis/GenMod_0.1.0_x64-setup.exe`，副本位于 `build-output/GenMod_0.1.0_x64-setup.exe` | 61,549,822（约 58.70 MiB） | `B4C32E7D30D6978301764ED7F39369C55342EB239DDD769AAA25CA0EA26E999B` |
+
+随后按用户要求将压缩改回 LZMA，仅完成 JSON 解析、限定差异检查及 CodeGraph 索引同步，没有重新打包。现有 EXE 仍为上表的 zlib 产物；下一次构建才应用 LZMA，最终耗时和体积尚未测量。构建后继续修改的源码也需要重新打包才能进入安装包。
+
+本次未运行测试、应用、安装程序或游戏，未签名、发布或提交。资源检查与构建成功不替代上方待执行场景的真实验收。其他优化暂缓。

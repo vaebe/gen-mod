@@ -9,7 +9,7 @@
     "dev": "vite",
     "dev:app": "tauri dev",
     "build": "vue-tsc --noEmit && vite build",
-    "build:app": "tauri build",
+    "build:app": "node scripts/build-app.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint",

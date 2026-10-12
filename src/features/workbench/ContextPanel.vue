@@ -3,9 +3,11 @@ import type { FileChange, FileDiff as FileDiffData } from '@/contracts/changes'
 import type { ModProject } from '@/contracts/mod'
 import { useIntervalFn } from '@vueuse/core'
 import { computed, shallowRef, watch } from 'vue'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import ArtifactPanel from '@/features/mods/ArtifactPanel.vue'
 import { nativeCall } from '@/services/native'
 import { useProjectsStore } from '@/stores/projects'
@@ -179,14 +181,14 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
         </TabsTrigger>
       </TabsList>
       <TabsContent value="files" class="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
-        <div class="flex shrink-0 gap-1 border-b p-2" role="group" aria-label="文件查看范围">
-          <Button size="sm" :variant="fileMode === 'all' ? 'secondary' : 'ghost'" class="h-7 flex-1 text-xs" :aria-pressed="fileMode === 'all'" @click="fileMode = 'all'">
+        <ToggleGroup type="single" :model-value="fileMode" size="sm" class="shrink-0 border-b p-2" aria-label="文件查看范围" @update:model-value="($event === 'all' || $event === 'changes') && (fileMode = $event)">
+          <ToggleGroupItem value="all" class="flex-1">
             全部文件
-          </Button>
-          <Button size="sm" :variant="fileMode === 'changes' ? 'secondary' : 'ghost'" class="h-7 flex-1 text-xs" :aria-pressed="fileMode === 'changes'" @click="fileMode = 'changes'">
+          </ToggleGroupItem>
+          <ToggleGroupItem value="changes" class="flex-1">
             当前变更
-          </Button>
-        </div>
+          </ToggleGroupItem>
+        </ToggleGroup>
         <SourceBrowser v-show="fileMode === 'all'" :mod-id="session.modId" :revision="session.changeRevision" :active="selectedTab === 'files' && fileMode === 'all'" />
         <ScrollArea v-if="fileMode === 'changes'" class="min-h-0 flex-1">
           <div v-if="session.task" class="space-y-2 border-b p-3 text-xs">
@@ -245,10 +247,10 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
           <p v-if="!artifactProject?.versions.length" class="p-3 text-xs leading-6 text-muted-foreground">
             尚无成功交付版本。
           </p>
-          <button v-for="version in [...(artifactProject?.versions ?? [])].reverse()" :key="version.versionId" type="button" class="block w-full border-b p-3 text-left text-xs transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" :aria-label="`查看版本 ${version.versionId.slice(0, 8)} 的详情`" :title="`查看版本 ${version.versionId} 的详情`" @click="viewArtifact(version.versionId)">
-            <span class="flex flex-wrap items-center justify-between gap-2"><span class="font-mono">{{ version.versionId.slice(0, 8) }}</span><span v-if="installedVersionIds.has(version.versionId)" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400">当前安装</span></span>
+          <Button v-for="version in [...(artifactProject?.versions ?? [])].reverse()" :key="version.versionId" type="button" variant="ghost" class="h-auto w-full flex-col items-stretch whitespace-normal rounded-none border-b p-3 text-left" :aria-label="`查看版本 ${version.versionId.slice(0, 8)} 的详情`" :title="`查看版本 ${version.versionId} 的详情`" @click="viewArtifact(version.versionId)">
+            <span class="flex flex-wrap items-center justify-between gap-2"><span class="font-mono">{{ version.versionId.slice(0, 8) }}</span><Badge v-if="installedVersionIds.has(version.versionId)" variant="outline">当前安装</Badge></span>
             <span class="mt-2 block text-muted-foreground">{{ version.files.length }} 个文件 · {{ new Date(version.createdAt).toLocaleString() }}</span>
-          </button>
+          </Button>
         </div>
       </TabsContent>
     </Tabs>

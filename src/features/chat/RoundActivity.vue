@@ -3,7 +3,9 @@ import type { ConversationRound } from './conversationRounds'
 import type { ToolRun } from '@/contracts/session'
 import { ChevronRight, LoaderCircle } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
-import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useId, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import MessageParts from './MessageParts.vue'
 
 const props = defineProps<{ round: ConversationRound, tools: Record<string, ToolRun>, modId: string, activity: string, lastActivityAt: number }>()
@@ -12,7 +14,6 @@ const processOpen = shallowRef(false)
 const following = shallowRef(true)
 const scroll = useTemplateRef<HTMLElement>('scroll')
 const content = useTemplateRef<HTMLElement>('content')
-const processId = useId()
 const thinkingScroll = useTemplateRef<HTMLElement>('thinkingScroll')
 const thinkingFollowing = shallowRef(true)
 const activeThinking = computed(() => {
@@ -110,16 +111,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="text-muted-foreground">
-    <button type="button" class="flex w-full flex-wrap items-center gap-2 border-b pb-2 text-left text-xs focus-visible:outline focus-visible:outline-ring" :aria-expanded="processOpen" :aria-controls="processId" @click="processOpen = !processOpen">
-      <ChevronRight class="size-3.5 shrink-0 transition-transform" :class="processOpen && 'rotate-90'" />
-      <LoaderCircle v-if="round.running" class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-      <span :class="failed && 'text-destructive'">{{ status }}</span>
-      <span v-if="duration">· {{ duration }}</span>
-      <span v-if="round.running" role="status" class="min-w-0 flex-1 truncate">{{ summary }}</span>
-      <span v-else class="ml-auto">{{ processOpen ? '收起过程' : '查看过程' }}</span>
-    </button>
-    <div v-show="processOpen" :id="processId">
+  <Collapsible v-model:open="processOpen" class="text-muted-foreground">
+    <CollapsibleTrigger as-child>
+      <Button type="button" variant="ghost" size="sm" class="h-auto w-full flex-wrap justify-start py-2">
+        <ChevronRight class="size-3.5 shrink-0 transition-transform" :class="processOpen && 'rotate-90'" />
+        <LoaderCircle v-if="round.running" class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        <span :class="failed && 'text-destructive'">{{ status }}</span>
+        <span v-if="duration">· {{ duration }}</span>
+        <span v-if="round.running" role="status" class="min-w-0 flex-1 truncate">{{ summary }}</span>
+        <span v-else class="ml-auto">{{ processOpen ? '收起过程' : '查看过程' }}</span>
+      </Button>
+    </CollapsibleTrigger>
+    <CollapsibleContent v-show="processOpen" force-mount>
       <div ref="scroll" class="process-scroll overflow-y-auto overscroll-contain py-3 pr-2" @scroll.stop="onScroll">
         <div ref="content" class="space-y-3">
           <MessageParts v-for="message in processMessages" :key="message.id" :message="message" :tools="tools" :mod-id="modId" />
@@ -140,11 +143,11 @@ onBeforeUnmount(() => {
           </p>
         </div>
       </div>
-      <button v-if="round.running && !following" type="button" class="mt-1 rounded-md px-2 py-1 text-xs hover:bg-muted focus-visible:outline focus-visible:outline-ring" @click="followLatest">
+      <Button v-if="round.running && !following" type="button" variant="ghost" size="xs" class="mt-1" @click="followLatest">
         回到最新
-      </button>
-    </div>
-  </div>
+      </Button>
+    </CollapsibleContent>
+  </Collapsible>
 </template>
 
 <style scoped>

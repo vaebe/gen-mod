@@ -2,7 +2,9 @@
 
 Vue 3 + Tauri 2 的本地 AI MOD 工作台。使用 shadcn-vue、Tailwind CSS 4、Pinia、Vue Router 和 markstream-vue；pi 1.1.0 通过 RPC 执行任务，SDK 仅辅助读取只读历史。支持多会话并发，同项目共享源码，应用元数据由 SQLite 保存。
 
-当前实现说明见 [项目上下文](docs/project-context.md)，文档同步日期为 2026-10-10。早期设计、实施记录与安装包的适用范围见 [文档入口](docs/README.md)。
+当前实现说明见 [项目上下文](docs/project-context.md)，文档同步日期为 2026-10-12。早期设计、实施记录与安装包的适用范围见 [文档入口](docs/README.md)。
+
+UI 开发优先复用 `src/components/ui` 中的 shadcn-vue 组件，具体规范见 [项目协作规范](AGENTS.md) 和 [UI 组件约定](docs/project-context.md#ui-组件约定)。本次统一调整已完成限定文件的静态检查，尚未进行界面运行验收。
 
 ## 开发准备
 
@@ -15,6 +17,21 @@ pnpm tauri dev
 ```
 
 依赖生命周期脚本默认不执行。运行时准备校验官方 Node ZIP、锁定 pi 版本、复制运行时依赖闭包并生成哈希清单，不复制真实 env、用户源码、日志或游戏 DLL。
+
+## Windows 打包
+
+```powershell
+pnpm prepare:runtime
+pnpm build:app
+```
+
+仅生成 NSIS `.exe` 安装包，默认 `pnpm build:app` 成功后自动复制到根目录 `build-output/`，原始产物保留在 `src-tauri/target/release/bundle/nsis/`。也可执行 `node scripts/collect-build-artifacts.mjs` 收集已有安装包。使用 LZMA 压缩减小安装包体积，制作时间会比 zlib 更长。
+
+自动收集仅适用于不带额外参数的默认 Windows x64 release 构建；`build-output/` 不纳入 Git。收集脚本只复制已有安装包，不会重新构建。当前 LZMA 配置尚未重新打包，已有安装包仍使用 zlib；构建耗时、产物信息及验证边界见 [Windows 发布记录](docs/verification/windows-release.md#2026-10-12打包优化与当前配置)。
+
+Rust release 使用 Thin LTO 和 16 个代码生成单元，保留 `opt-level = 3`。首次切换编译参数会重编译依赖；后续构建复用缓存。重复准备时，内容相同的扩展、helper 和资源清单不会重写，避免仅因时间戳变化触发 Rust 重建。
+
+Node 分发仅包含 `node.exe` 和许可证；pi 保留运行依赖、类型声明及许可证，排除 source map，因此分发版本的依赖错误堆栈不能通过这些文件映射回原始源码。首次应用精简规则时，准备脚本将旧 pi 目录保留在 `work/pi-portable-before-slim-*`，再生成新目录与资源哈希清单。
 
 ## 模型配置
 

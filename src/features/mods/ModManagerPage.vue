@@ -4,6 +4,7 @@ import type { ModProject } from '@/contracts/mod'
 import { computed, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { displayPath } from '@/lib/displayPath'
 import { modService, nativeCall } from '@/services/native'
@@ -179,24 +180,28 @@ async function deleteVersion(): Promise<void> {
     </div>
     <template v-if="project">
       <div class="flex shrink-0 items-start gap-2 rounded-lg border bg-muted/20 px-3 py-2">
-        <details class="min-w-0 flex-1">
-          <summary class="cursor-pointer text-xs leading-7">
-            当前安装：{{ installationSummary }}
-          </summary>
-          <div class="max-h-28 space-y-3 overflow-y-auto pb-1 pt-2 text-xs">
-            <p v-if="!project.installedTargets.length" class="text-muted-foreground">
-              尚未安装任何版本。
-            </p>
-            <div v-for="target in project.installedTargets" :key="target.targetDirectory">
-              <p class="break-all font-mono">
-                {{ displayPath(target.targetDirectory) }}
+        <Collapsible class="min-w-0 flex-1">
+          <CollapsibleTrigger as-child>
+            <Button type="button" variant="ghost" size="sm" class="h-auto w-full justify-start whitespace-normal text-left">
+              当前安装：{{ installationSummary }}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div class="max-h-28 space-y-3 overflow-y-auto pb-1 pt-2 text-xs">
+              <p v-if="!project.installedTargets.length" class="text-muted-foreground">
+                尚未安装任何版本。
               </p>
-              <p class="mt-1" :class="target.state === 'uncertain' ? 'text-destructive' : 'text-muted-foreground'">
-                {{ target.state === 'uncertain' ? '目标状态不确定，请检查部署文件' : `当前版本 ${target.versionId?.slice(0, 8)}` }}<span v-if="target.state === 'known' && target.versionId !== project.latestVersionId" class="ml-2">最新版本待安装</span>
-              </p>
+              <div v-for="target in project.installedTargets" :key="target.targetDirectory">
+                <p class="break-all font-mono">
+                  {{ displayPath(target.targetDirectory) }}
+                </p>
+                <p class="mt-1" :class="target.state === 'uncertain' ? 'text-destructive' : 'text-muted-foreground'">
+                  {{ target.state === 'uncertain' ? '目标状态不确定，请检查部署文件' : `当前版本 ${target.versionId?.slice(0, 8)}` }}<span v-if="target.state === 'known' && target.versionId !== project.latestVersionId" class="ml-2">最新版本待安装</span>
+                </p>
+              </div>
             </div>
-          </div>
-        </details>
+          </CollapsibleContent>
+        </Collapsible>
         <Button size="sm" variant="ghost" class="h-7 shrink-0 px-2 text-xs" @click="historyOpen = true">
           安装记录（{{ project.installations.length }}）
         </Button>

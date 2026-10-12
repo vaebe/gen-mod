@@ -3,6 +3,7 @@ import type { ChatMessage, ToolRun } from '@/contracts/session'
 import type { TaskRecord } from '@/contracts/task'
 import { Check, Copy } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { Button } from '@/components/ui/button'
 import ChatImage from './ChatImage.vue'
 import { conversationRounds } from './conversationRounds'
 import MessageParts from './MessageParts.vue'
@@ -115,10 +116,10 @@ watch(() => [props.messages, props.working], async () => {
         <article v-if="round.answer" class="assistant-reply select-text">
           <MessageParts :message="{ ...round.answer, parts: round.answer.parts.filter(part => part.type === 'text') }" :tools="tools" :mod-id="modId" />
           <div class="mt-2 flex select-none items-center gap-2 text-xs text-muted-foreground">
-            <button type="button" class="inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50" :disabled="!!copyingId" :title="copiedId === round.answer.id ? '已复制' : '复制回复'" :aria-label="copiedId === round.answer.id ? '已复制' : '复制回复'" @click="copyReply(round.answer)">
+            <Button type="button" variant="ghost" size="icon-sm" :disabled="!!copyingId" :title="copiedId === round.answer.id ? '已复制' : '复制回复'" :aria-label="copiedId === round.answer.id ? '已复制' : '复制回复'" @click="copyReply(round.answer)">
               <Check v-if="copiedId === round.answer.id" class="size-4" aria-hidden="true" />
               <Copy v-else class="size-4" aria-hidden="true" />
-            </button>
+            </Button>
             <span v-if="copiedId === round.answer.id" role="status">已复制</span>
             <span v-if="replyTime(round.answer.timestamp)">{{ replyTime(round.answer.timestamp) }}</span>
           </div>

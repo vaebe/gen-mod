@@ -2,9 +2,9 @@
 import type { ModelSelection, ProviderConfiguration, SessionModelState } from '@/contracts/config'
 import type { ContextUsage, PromptAttachment, ThinkingLevel } from '@/contracts/session'
 import { ArrowUp, FileText, Paperclip, Plus, Shrink, Square, X } from '@lucide/vue'
-import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import ChatImage from './ChatImage.vue'
 import ContextUsageIndicator from './ContextUsageIndicator.vue'
@@ -101,7 +101,7 @@ function pasteFiles(event: ClipboardEvent): void {
 
 <template>
   <div class="shrink-0 px-4 pt-2 pb-3 lg:px-8">
-    <PopoverRoot v-model:open="menuOpen">
+    <Popover v-model:open="menuOpen">
       <PopoverAnchor as-child>
         <div class="mx-auto max-w-3xl rounded-2xl border bg-card p-3 shadow-xs">
           <input ref="picker" type="file" multiple class="hidden" @change="chooseFiles">
@@ -135,16 +135,14 @@ function pasteFiles(event: ClipboardEvent): void {
           </p>
         </div>
       </PopoverAnchor>
-      <PopoverPortal>
-        <PopoverContent side="top" align="start" :side-offset="8" class="z-50 w-[var(--reka-popover-trigger-width)] max-h-80 overflow-y-auto rounded-2xl border bg-popover p-1.5 text-popover-foreground shadow-sm" @open-auto-focus="slashMenu && $event.preventDefault()" @interact-outside="slashMenu && ($event.target as HTMLElement).closest('[data-slot=textarea]') && $event.preventDefault()">
-          <button v-for="(action, index) in actions" :key="action.id" type="button" :disabled="action.disabled" class="flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-left hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:opacity-40" :class="slashMenu && selectedAction === index && 'bg-muted'" @click="runAction(action.id)">
-            <component :is="action.icon" class="size-4 shrink-0 text-muted-foreground" /><span class="shrink-0 text-sm">{{ action.label }}</span><span class="min-w-0 truncate text-sm text-muted-foreground">{{ action.description }}</span>
-          </button>
-          <p v-if="!actions.length" class="px-3 py-2 text-xs text-muted-foreground">
-            没有匹配的功能
-          </p>
-        </PopoverContent>
-      </PopoverPortal>
-    </PopoverRoot>
+      <PopoverContent side="top" align="start" :side-offset="8" class="w-(--reka-popover-trigger-width) max-h-80 overflow-y-auto p-1.5" @open-auto-focus="slashMenu && $event.preventDefault()" @interact-outside="slashMenu && ($event.target as HTMLElement).closest('[data-slot=textarea]') && $event.preventDefault()">
+        <Button v-for="(action, index) in actions" :key="action.id" type="button" :disabled="action.disabled" variant="ghost" class="h-auto w-full justify-start gap-2.5" :class="slashMenu && selectedAction === index && 'bg-muted'" @click="runAction(action.id)">
+          <component :is="action.icon" class="size-4 shrink-0 text-muted-foreground" /><span class="shrink-0 text-sm">{{ action.label }}</span><span class="min-w-0 truncate text-sm text-muted-foreground">{{ action.description }}</span>
+        </Button>
+        <p v-if="!actions.length" class="px-3 py-2 text-xs text-muted-foreground">
+          没有匹配的功能
+        </p>
+      </PopoverContent>
+    </Popover>
   </div>
 </template>

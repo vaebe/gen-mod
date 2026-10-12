@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import type { ModelForm, ProviderApi, ProviderConfiguration } from '@/contracts/config'
-import { defineAsyncComponent, reactive, shallowRef } from 'vue'
+import { defineAsyncComponent, reactive, shallowRef, useId } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
 import { providerApis } from '@/contracts/config'
 
 const props = defineProps<{ provider?: ProviderConfiguration, existingIds: string[] }>()
 const emit = defineEmits<{ apply: [provider: ProviderConfiguration], cancel: [] }>()
 const ModelEditor = defineAsyncComponent(() => import('./ModelEditor.vue'))
 const error = shallowRef('')
+const fieldId = useId()
 const form = reactive({
   id: props.provider?.id ?? '',
   name: props.provider?.name ?? '',
@@ -52,20 +56,61 @@ function apply(): void {
 
 <template>
   <form class="flex min-h-0 flex-col" @submit.prevent="apply">
-    <div class="min-h-0 space-y-6 overflow-y-auto px-6 py-5">
-      <div class="grid gap-x-4 gap-y-5 sm:grid-cols-2">
-        <label class="flex flex-col gap-2 text-sm"><span>名称</span><Input v-model="form.name" required placeholder="例如：我的模型服务" /></label>
-        <label class="flex flex-col gap-2 text-sm"><span class="flex items-center justify-between gap-2">Provider ID <span class="text-xs text-muted-foreground">创建后不可修改</span></span><Input v-model="form.id" required :disabled="!!provider" placeholder="例如：my-provider" /></label>
-        <label class="flex flex-col gap-2 text-sm"><span>Base URL</span><Input v-model="form.baseUrl" type="url" required placeholder="https://api.example.com/v1" /></label>
-        <label class="flex flex-col gap-2 text-sm"><span>API 协议</span><select v-model="form.api" class="h-9 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline focus-visible:outline-ring"><option v-for="api in providerApis" :key="api.value" :value="api.value">{{ api.label }}</option></select></label>
-        <label class="flex flex-col gap-2 text-sm sm:col-span-2"><span>API Key</span><Input v-model="form.apiKey" type="password" autocomplete="new-password" :placeholder="provider?.keyConfigured ? '已配置；留空保留原 Key' : '填写 API Key'" /><span class="text-xs leading-5 text-muted-foreground">{{ provider?.keyConfigured ? '留空保留原 Key，填写新值可替换。' : '本地无鉴权服务可填任意占位值。' }}</span></label>
-      </div>
-      <div class="border-t pt-5">
-        <ModelEditor v-model="form.models" />
-      </div>
-      <p v-if="error" role="alert" class="text-sm text-destructive">
+    <div class="flex min-h-0 flex-col gap-6 overflow-y-auto px-6 py-5">
+      <FieldGroup class="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+        <Field>
+          <FieldLabel :for="`${fieldId}-name`">
+            名称
+          </FieldLabel>
+          <Input :id="`${fieldId}-name`" v-model="form.name" required placeholder="例如：我的模型服务" />
+        </Field>
+        <Field :data-disabled="!!provider">
+          <FieldLabel :for="`${fieldId}-id`">
+            Provider ID
+          </FieldLabel>
+          <Input :id="`${fieldId}-id`" v-model="form.id" required :disabled="!!provider" :aria-describedby="`${fieldId}-id-help`" placeholder="例如：my-provider" />
+          <FieldDescription :id="`${fieldId}-id-help`">
+            创建后不可修改
+          </FieldDescription>
+        </Field>
+        <Field>
+          <FieldLabel :for="`${fieldId}-url`">
+            Base URL
+          </FieldLabel>
+          <Input :id="`${fieldId}-url`" v-model="form.baseUrl" type="url" required placeholder="https://api.example.com/v1" />
+        </Field>
+        <Field>
+          <FieldLabel :for="`${fieldId}-api`">
+            API 协议
+          </FieldLabel>
+          <Select v-model="form.api">
+            <SelectTrigger :id="`${fieldId}-api`" class="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem v-for="api in providerApis" :key="api.value" :value="api.value">
+                  {{ api.label }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field class="sm:col-span-2">
+          <FieldLabel :for="`${fieldId}-key`">
+            API Key
+          </FieldLabel>
+          <Input :id="`${fieldId}-key`" v-model="form.apiKey" type="password" autocomplete="new-password" :aria-describedby="`${fieldId}-key-help`" :placeholder="provider?.keyConfigured ? '已配置；留空保留原 Key' : '填写 API Key'" />
+          <FieldDescription :id="`${fieldId}-key-help`">
+            {{ provider?.keyConfigured ? '留空保留原 Key，填写新值可替换。' : '本地无鉴权服务可填任意占位值。' }}
+          </FieldDescription>
+        </Field>
+      </FieldGroup>
+      <Separator />
+      <ModelEditor v-model="form.models" />
+      <FieldError v-if="error">
         {{ error }}
-      </p>
+      </FieldError>
     </div>
     <div class="flex shrink-0 justify-end gap-2 border-t px-6 py-4">
       <Button type="button" variant="outline" @click="emit('cancel')">

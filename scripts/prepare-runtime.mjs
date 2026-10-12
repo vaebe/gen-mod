@@ -57,16 +57,31 @@ if (!existsSync(deploymentMarker)) {
 const installed = JSON.parse(readFileSync(join(deploy, "node_modules", lock.pi.package, "package.json"), "utf8"));
 if (installed.version !== lock.pi.version) { throw new Error("部署的 pi 版本与锁文件不一致"); }
 const portable = join(resources, `pi-portable-v${lock.pi.version}`);
-if (!existsSync(join(portable, ".deployment-complete"))) {
+const portableMarker = join(portable, ".deployment-complete");
+const portableRevision = `${lock.pi.version}:no-source-maps-v1`;
+if (!existsSync(portableMarker) || readFileSync(portableMarker, "utf8") !== portableRevision) {
+  if (existsSync(portable)) {
+    // 规则更新时保留旧目录，避免覆盖复制后仍留下被排除的文件。
+    const previous = join(root, "work", `pi-portable-before-slim-${Date.now()}`);
+    if (!relative(resources, portable).startsWith("..") && !relative(join(root, "work"), previous).startsWith("..")) {
+      mkdirSync(join(root, "work"), { recursive: true });
+      renameSync(portable, previous);
+    } else { throw new Error("运行时恢复路径越界"); }
+  }
   console.log("实体化 pi 运行时依赖闭包…");
   const count = materialize(deploy, portable);
-  writeFileSync(join(portable, ".deployment-complete"), lock.pi.version);
+  writeFileSync(portableMarker, portableRevision);
   console.log(`复制 ${count} 个运行时依赖目录（不含页面依赖闭包）`);
 }
+// Tauri 按资源修改时间触发 Rust 重建，内容相同时避免重新复制。
+const runtimeCopyOptions = {
+  recursive: true,
+  filter: (source, destination) => statSync(source).isDirectory() || !existsSync(destination) || !readFileSync(source).equals(readFileSync(destination)),
+};
 if (existsSync(join(root, "runtime/extensions"))) {
-  cpSync(join(root, "runtime/extensions"), join(portable, "extensions"), { recursive: true });
+  cpSync(join(root, "runtime/extensions"), join(portable, "extensions"), runtimeCopyOptions);
 }
-cpSync(join(root, "runtime/helpers"), join(portable, "helpers"), { recursive: true });
+cpSync(join(root, "runtime/helpers"), join(portable, "helpers"), runtimeCopyOptions);
 
 // 记录可审计的资源哈希，发布前检查完整性；不复制项目 env 或用户资料。
 const files = [];
@@ -83,9 +98,18 @@ function inventory(directory, output = files, base = resources) {
     else { output.push({ path: relative(base, path).replaceAll("\\", "/"), size: info.size, sha256: hash(readFileSync(path)) }); }
   }
 }
-inventory(join(resources, lock.node.directory));
+// 与 Tauri 的 Node 文件白名单一致，不将 npm/corepack 等开发工具计入分发清单。
+for (const name of ["node.exe", "LICENSE"]) {
+  const path = join(resources, lock.node.directory, name);
+  const bytes = readFileSync(path);
+  files.push({ path: relative(resources, path).replaceAll("\\", "/"), size: bytes.length, sha256: hash(bytes) });
+}
 inventory(portable);
 const skillFiles = [];
 inventory(join(root, "skills"), skillFiles, join(root, "skills"));
-writeFileSync(join(resources, "resource-manifest.json"), JSON.stringify({ pi: lock.pi.version, node: lock.node.version, files, skills: skillFiles }, null, 2));
+const manifestPath = join(resources, "resource-manifest.json");
+const manifest = JSON.stringify({ pi: lock.pi.version, node: lock.node.version, files, skills: skillFiles }, null, 2);
+if (!existsSync(manifestPath) || readFileSync(manifestPath, "utf8") !== manifest) {
+  writeFileSync(manifestPath, manifest);
+}
 console.log(`已准备 Node ${lock.node.version} / pi ${lock.pi.version}，${files.length} 个运行时文件、${skillFiles.length} 个 skills 文件`);

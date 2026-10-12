@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { SourceTreeRow } from './useSourceBrowser'
 import { ChevronRight, FileCode, Folder, FolderOpen, LoaderCircle, LockKeyhole } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
 
 defineProps<{ rows: SourceTreeRow[], selected: string, loading: boolean, error: string }>()
 defineEmits<{ select: [path: string], toggle: [path: string], retry: [path: string] }>()
@@ -14,9 +15,9 @@ defineEmits<{ select: [path: string], toggle: [path: string], retry: [path: stri
     <div v-else-if="error" class="space-y-2 px-3 py-2">
       <p role="alert" class="break-words text-destructive">
         {{ error }}
-      </p><button type="button" class="underline underline-offset-4" @click="$emit('retry', '')">
+      </p><Button type="button" variant="link" size="xs" class="h-auto p-0" @click="$emit('retry', '')">
         重试
-      </button>
+      </Button>
     </div>
     <p v-else-if="!rows.length" class="px-3 py-4 text-muted-foreground">
       源码目录为空。
@@ -30,9 +31,9 @@ defineEmits<{ select: [path: string], toggle: [path: string], retry: [path: stri
       <div v-if="row.expanded && row.error" :style="{ paddingLeft: `${row.depth * 14 + 30}px` }" class="space-y-1 py-2 pr-3">
         <p role="alert" class="break-words text-destructive">
           {{ row.error }}
-        </p><button type="button" class="underline underline-offset-4" @click="$emit('retry', row.path)">
+        </p><Button type="button" variant="link" size="xs" class="h-auto p-0" @click="$emit('retry', row.path)">
           重试
-        </button>
+        </Button>
       </div>
       <p v-else-if="row.expanded && row.empty" :style="{ paddingLeft: `${row.depth * 14 + 30}px` }" class="py-1 text-muted-foreground">
         空文件夹

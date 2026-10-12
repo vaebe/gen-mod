@@ -5,7 +5,9 @@ import type { TaskRecord } from '@/contracts/task'
 import { RotateCw, Unplug } from '@lucide/vue'
 import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { useConfiguration } from '@/features/settings/useConfiguration'
 import { modService, nativeCall } from '@/services/native'
 import { useProjectsStore } from '@/stores/projects'
@@ -270,16 +272,19 @@ onBeforeRouteUpdate(leave)
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div v-if="connectionIssue" :role="runtimeClosed ? 'status' : 'alert'" class="flex shrink-0 items-center gap-3 border-b bg-muted/30 px-5 py-2 text-xs">
-      <Unplug v-if="runtimeClosed" class="size-3.5 shrink-0 text-muted-foreground" />
-      <span class="min-w-0 flex-1 break-words" :class="runtimeClosed ? 'text-muted-foreground' : 'text-destructive'">{{ runtimeClosed ? '会话连接已断开' : connectionIssue }}</span>
-      <Button v-if="session.restartAvailable" variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 rounded-md text-xs" :disabled="opening" @click="session.restart().catch(cause => error = cause.message)">
-        <RotateCw class="size-3.5" />重启运行时
-      </Button>
-      <Button v-else-if="project && reconnectId" variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 rounded-md text-xs" :disabled="opening || session.busy" @click="reconnect">
-        <RotateCw class="size-3.5" />{{ opening ? '正在连接…' : '重新连接' }}
-      </Button>
-    </div>
+    <Alert v-if="connectionIssue" :role="runtimeClosed ? 'status' : 'alert'" :variant="runtimeClosed ? 'default' : 'destructive'" class="shrink-0">
+      <Unplug v-if="runtimeClosed" />
+      <AlertTitle>{{ runtimeClosed ? '会话连接已断开' : '会话连接异常' }}</AlertTitle>
+      <AlertDescription class="flex flex-wrap items-center justify-between gap-3">
+        <span class="min-w-0 flex-1 break-words">{{ connectionIssue }}</span>
+        <Button v-if="session.restartAvailable" variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 rounded-md text-xs" :disabled="opening" @click="session.restart().catch(cause => error = cause.message)">
+          <RotateCw class="size-3.5" />重启运行时
+        </Button>
+        <Button v-else-if="project && reconnectId" variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 rounded-md text-xs" :disabled="opening || session.busy" @click="reconnect">
+          <RotateCw class="size-3.5" />{{ opening ? '正在连接…' : '重新连接' }}
+        </Button>
+      </AlertDescription>
+    </Alert>
     <p v-if="opening" class="px-5 py-3 text-xs text-muted-foreground">
       正在恢复会话历史…
     </p>
@@ -287,17 +292,17 @@ onBeforeRouteUpdate(leave)
     <div v-else-if="loadingProject || opening" role="status" class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
       正在加载会话…
     </div>
-    <div v-else class="flex min-h-0 flex-1 items-center justify-center overflow-auto px-8 py-10">
-      <div class="max-w-md text-center">
-        <p class="mb-3 text-xs text-muted-foreground">
+    <Empty v-else class="min-h-0 overflow-auto">
+      <EmptyHeader>
+        <EmptyDescription>
           {{ project?.gameSkillName }}
-        </p><h2 class="text-xl font-semibold">
+        </EmptyDescription><EmptyTitle>
           你的 MOD，想从哪里开始？
-        </h2><p class="mt-3 text-sm leading-7 text-muted-foreground">
+        </EmptyTitle><EmptyDescription>
           描述希望实现的行为。源码会保存在项目中，每次成功交付形成独立版本。
-        </p>
-      </div>
-    </div>
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
     <div v-if="session.steeringInputs.some(input => ['unknown', 'handled', 'submitted', 'queued'].includes(input.status) && !session.chat.messages.some(message => message.inputId === input.inputId))" role="status" class="max-h-28 shrink-0 overflow-auto border-t px-5 py-2 text-xs text-muted-foreground">
       <p v-for="input in session.steeringInputs.filter(input => ['unknown', 'handled', 'submitted', 'queued'].includes(input.status) && !session.chat.messages.some(message => message.inputId === input.inputId))" :key="input.inputId" class="truncate" :title="input.message">
         补充要求{{ input.status === 'handled' ? '已处理，未关联到正式历史' : '尚未确认执行' }}，不会自动重发：{{ input.message }}

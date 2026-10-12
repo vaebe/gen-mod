@@ -37,7 +37,8 @@ export function materialize(deployment, destination) {
     const nested = new Set(chain); nested.add(path);
     cpSync(path, target, { recursive: true, dereference: true, filter: (source) => {
       const name = relative(path, source).replaceAll("\\", "/");
-      return !(name === "node_modules" || name.startsWith("node_modules/") || name === ".git" || name.startsWith(".git/") || name === ".env");
+      // 分发保留可执行代码和许可证；source map 仅用于调试，不随安装包复制。
+      return !(name === "node_modules" || name.startsWith("node_modules/") || name === ".git" || name.startsWith(".git/") || name === ".env" || /\.(?:js|mjs|cjs|ts|mts|cts)\.map$/.test(name));
     } });
     copied += 1;
     const scope = new Map(visible);

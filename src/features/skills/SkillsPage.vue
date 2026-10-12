@@ -2,6 +2,8 @@
 import type { SkillDefinition, SkillView } from '@/contracts/skill'
 import { defineAsyncComponent, onMounted, shallowRef } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { nativeCall } from '@/services/native'
@@ -83,30 +85,44 @@ onMounted(refresh)
           每个项目只加载所选游戏能力及其通用依赖。变更在下次新会话生效，旧会话保留为只读历史。
         </p>
       </div>
-      <p v-if="error" class="text-sm text-destructive" role="alert">
+      <FieldError v-if="error">
         {{ error }}
-      </p>
+      </FieldError>
       <ul class="divide-y border-y">
         <SkillDetails v-for="skill in skills" :key="skill.name" :skill="skill" :disabled="busy || session.anyBusy" @toggle="toggle(skill, $event)" @select="showSkill(skill)" />
       </ul>
-      <details class="rounded-lg border p-4">
-        <summary class="cursor-pointer text-sm font-medium">
-          导入本地能力
-        </summary><form class="mt-4 space-y-3" @submit.prevent="importLocal">
-          <div class="space-y-2">
-            <label for="skill-directory" class="block text-sm">能力目录</label><div class="flex gap-2">
-              <Input id="skill-directory" v-model="directory" class="min-w-0 flex-1" :disabled="busy" placeholder="选择包含 SKILL.md 的目录" required /><Button type="button" variant="outline" :disabled="busy || session.anyBusy" @click="chooseDirectory">
-                选择目录
-              </Button>
-            </div>
-          </div>
-          <label class="block text-sm">应用能力元数据<Textarea v-model="metadata" class="mt-2 font-mono text-xs" :disabled="busy" rows="7" required /></label><p class="text-xs text-muted-foreground">
-            目录需包含标准 SKILL.md。只校验并复制文件，不执行导入脚本；内置能力不可覆盖。
-          </p><Button :disabled="busy || session.anyBusy || !directory.trim()">
-            导入
+      <Collapsible class="rounded-lg border p-4">
+        <CollapsibleTrigger as-child>
+          <Button type="button" variant="ghost" size="sm">
+            导入本地能力
           </Button>
-        </form>
-      </details>
+        </CollapsibleTrigger><CollapsibleContent>
+          <form class="mt-4" @submit.prevent="importLocal">
+            <FieldGroup>
+              <Field :data-disabled="busy">
+                <FieldLabel for="skill-directory">
+                  能力目录
+                </FieldLabel><div class="flex gap-2">
+                  <Input id="skill-directory" v-model="directory" class="min-w-0 flex-1" :disabled="busy" placeholder="选择包含 SKILL.md 的目录" required /><Button type="button" variant="outline" :disabled="busy || session.anyBusy" @click="chooseDirectory">
+                    选择目录
+                  </Button>
+                </div>
+              </Field>
+              <Field :data-disabled="busy">
+                <FieldLabel for="skill-metadata">
+                  应用能力元数据
+                </FieldLabel>
+                <Textarea id="skill-metadata" v-model="metadata" class="font-mono" :disabled="busy" rows="7" required aria-describedby="skill-import-help" />
+                <FieldDescription id="skill-import-help">
+                  目录需包含标准 SKILL.md。只校验并复制文件，不执行导入脚本；内置能力不可覆盖。
+                </FieldDescription>
+              </Field><Button type="submit" class="self-start" :disabled="busy || session.anyBusy || !directory.trim()">
+                导入
+              </Button>
+            </FieldGroup>
+          </form>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
     <SkillContentDialog v-if="selectedSkill" v-model:open="detailOpen" :skill="selectedSkill" />
   </section>

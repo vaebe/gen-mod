@@ -2,6 +2,8 @@
 import { ArrowUpRight, Folder, Plus } from '@lucide/vue'
 import { shallowRef } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { useProjectsStore } from '@/stores/projects'
 import NewModDialog from './NewModDialog.vue'
 
@@ -33,26 +35,38 @@ const createOpen = shallowRef(false)
       <p v-else-if="projects.loading" class="mt-8 text-sm text-muted-foreground">
         正在读取本地项目…
       </p>
-      <div v-else-if="!projects.projects.length" class="mt-10 rounded-xl border border-dashed px-6 py-16 text-center">
-        <Folder class="mx-auto mb-4 size-8 text-muted-foreground" /><h2 class="text-base font-medium">
-          第一个 MOD，从这里开始
-        </h2><p class="mx-auto mt-2 mb-6 max-w-sm text-sm leading-6 text-muted-foreground">
-          描述想改变的游戏体验，选择 skill，让 AI 协助完成源码和交付。
-        </p><Button variant="outline" @click="createOpen = true">
-          创建项目
-        </Button>
-      </div>
+      <Empty v-else-if="!projects.projects.length" class="mt-10 border">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <Folder />
+          </EmptyMedia><EmptyTitle>
+            第一个 MOD，从这里开始
+          </EmptyTitle><EmptyDescription>
+            描述想改变的游戏体验，选择 skill，让 AI 协助完成源码和交付。
+          </EmptyDescription>
+        </EmptyHeader><EmptyContent>
+          <Button variant="outline" @click="createOpen = true">
+            创建项目
+          </Button>
+        </EmptyContent>
+      </Empty>
       <div v-else class="mt-8 grid gap-3 md:grid-cols-2">
-        <RouterLink v-for="project in projects.projects" :key="project.modId" :to="`/mods/${project.modId}/chat`" class="group rounded-xl border bg-card p-5 transition-colors hover:bg-accent/40">
-          <div class="flex items-center gap-3">
-            <Folder class="size-4 text-muted-foreground" /><h2 class="truncate text-sm font-medium">
-              {{ project.name }}
-            </h2><ArrowUpRight class="ml-auto size-4 text-muted-foreground" />
-          </div><p class="mt-3 line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground">
-            {{ project.draftRequirement || '打开项目，继续描述你的需求。' }}
-          </p><div class="mt-4 flex justify-between text-[11px] text-muted-foreground">
-            <span>{{ project.gameSkillName }}</span><span>{{ project.versions.length }} 个交付版本</span>
-          </div>
+        <RouterLink v-for="project in projects.projects" :key="project.modId" :to="`/mods/${project.modId}/chat`" class="group rounded-xl focus-visible:outline focus-visible:outline-ring">
+          <Card class="flex h-full flex-col">
+            <CardHeader>
+              <div class="flex items-center gap-3">
+                <Folder class="size-4 text-muted-foreground" /><CardTitle class="truncate">
+                  {{ project.name }}
+                </CardTitle><ArrowUpRight class="ml-auto size-4 text-muted-foreground" />
+              </div>
+            </CardHeader><CardContent class="flex-1">
+              <CardDescription class="line-clamp-2 min-h-10">
+                {{ project.draftRequirement || '打开项目，继续描述你的需求。' }}
+              </CardDescription>
+            </CardContent><CardFooter class="justify-between gap-3 text-xs text-muted-foreground">
+              <span>{{ project.gameSkillName }}</span><span>{{ project.versions.length }} 个交付版本</span>
+            </CardFooter>
+          </Card>
         </RouterLink>
       </div>
     </div><NewModDialog v-model:open="createOpen" />

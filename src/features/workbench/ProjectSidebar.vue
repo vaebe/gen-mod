@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { SessionAction } from './SessionManageDialog.vue'
 import { Folder, FolderOpen, MoreVertical, Pencil, Settings, Sparkles, Trash2 } from '@lucide/vue'
-import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
 import { shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem, SidebarTrigger } from '@/components/ui/sidebar'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
@@ -83,21 +84,22 @@ async function createSession(modId: string): Promise<void> {
                 </SidebarMenuSubButton>
                 <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1">
                   <span class="flex size-4 items-center [&>span]:mr-0"><SessionRunIndicator :busy="session.isRunning(project.modId, item.sessionId)" :label="session.stateFor(project.modId, item.sessionId)?.activity" /></span>
-                  <DropdownMenuRoot>
+                  <DropdownMenu>
                     <DropdownMenuTrigger as-child>
-                      <button type="button" :aria-label="`${item.name || '新会话'}的操作`" title="会话操作" class="flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/session:opacity-100 group-focus-within/session:opacity-100 data-[state=open]:opacity-100">
+                      <Button type="button" variant="ghost" size="icon-xs" :aria-label="`${item.name || '新会话'}的操作`" title="会话操作" class="opacity-0 group-hover/session:opacity-100 group-focus-within/session:opacity-100 data-[state=open]:opacity-100">
                         <MoreVertical class="size-4" />
-                      </button>
-                    </DropdownMenuTrigger><DropdownMenuPortal>
-                      <DropdownMenuContent align="start" :side-offset="4" class="z-50 min-w-32 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
-                        <DropdownMenuItem class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent" @select="action = { modId: project.modId, sessionId: item.sessionId, name: item.name || '新会话', kind: 'rename' }">
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" :side-offset="4" class="min-w-40">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem @select="action = { modId: project.modId, sessionId: item.sessionId, name: item.name || '新会话', kind: 'rename' }">
                           <Pencil class="size-4" />重命名
-                        </DropdownMenuItem><DropdownMenuItem :disabled="session.isBusy(project.modId, item.sessionId)" class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive outline-none data-[highlighted]:bg-accent" @select="action = { modId: project.modId, sessionId: item.sessionId, name: item.name || '新会话', kind: 'delete' }">
+                        </DropdownMenuItem><DropdownMenuItem class="text-destructive" :disabled="session.isBusy(project.modId, item.sessionId)" @select="action = { modId: project.modId, sessionId: item.sessionId, name: item.name || '新会话', kind: 'delete' }">
                           <Trash2 class="size-4" />删除会话
                         </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenuPortal>
-                  </DropdownMenuRoot>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </SidebarMenuSubItem>
             </SidebarMenuSub>
