@@ -34,6 +34,13 @@ pub fn initialize(app: &tauri::AppHandle) -> Result<(), String> {
         tx.execute("INSERT INTO schema_migrations VALUES(1,?1)", [super::mods::now()?]).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
     }
+    let model_migration: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=2)", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    if !model_migration {
+        let tx = connection.transaction().map_err(|e| e.to_string())?;
+        tx.execute_batch(include_str!("migrations/002_session_model.sql")).map_err(|e| e.to_string())?;
+        tx.execute("INSERT INTO schema_migrations VALUES(2,?1)", [super::mods::now()?]).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+    }
     app.manage(Database(path));
     super::migration::import(app)?;
     super::repository::interrupt_previous(app)?;

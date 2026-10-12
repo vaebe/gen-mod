@@ -90,6 +90,67 @@ pub struct ModelConfig {
     settings: SettingsFile,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSelection {
+    pub provider_id: String,
+    pub model_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionModelState {
+    pub selection: ModelSelection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub definition: Option<ModelDefinition>,
+    pub error: String,
+    pub thinking_level: String,
+    pub thinking_levels: Vec<String>,
+}
+
+pub const THINKING_LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+impl ModelDefinition {
+    pub fn thinking_levels(&self) -> Vec<String> {
+        if !self.reasoning { return vec!["off".into()]; }
+        THINKING_LEVELS.into_iter().filter(|level| {
+            match self.thinking_level_map.get(*level) {
+                Some(None) => false,
+                Some(Some(_)) => true,
+                None => !matches!(*level, "xhigh" | "max"),
+            }
+        }).map(str::to_owned).collect()
+    }
+}
+
+pub fn effective_thinking(levels: &[String], preferred: &str) -> String {
+    if levels.iter().any(|level| level == preferred) { return preferred.into(); }
+    // 不支持已保存偏好时，采用最接近 medium 的档位；同距优先较低档位。
+    levels.iter().min_by_key(|level| THINKING_LEVELS.iter().position(|value| *value == level.as_str()).unwrap_or(0).abs_diff(3))
+        .cloned().unwrap_or_else(|| "off".into())
+}
+
+pub fn session_model_state(app: &tauri::AppHandle, selection: Option<ModelSelection>, preferred: &str) -> SessionModelState {
+    let mut result = SessionModelState { selection: selection.clone().unwrap_or(ModelSelection { provider_id: String::new(), model_id: String::new() }), definition: None, error: String::new(), thinking_level: "off".into(), thinking_levels: vec![] };
+    let inspect = (|| -> Result<(), String> {
+        let state = app.state::<ConfigurationState>();
+        let _guard = state.0.lock().map_err(|_| "配置锁异常")?;
+        let (models, settings) = load(app)?;
+        if selection.is_none() { result.selection = ModelSelection { provider_id: settings.default_provider, model_id: settings.default_model }; }
+        let mut provider = models.providers.get(&result.selection.provider_id).cloned().ok_or("聊天所选模型服务不存在，请重新选择模型")?;
+        restore_thinking_map(&mut provider);
+        let model = provider.models.iter().find(|model| model.id == result.selection.model_id).cloned().ok_or("聊天所选模型不存在，请重新选择模型")?;
+        result.thinking_levels = model.thinking_levels();
+        result.thinking_level = effective_thinking(&result.thinking_levels, preferred);
+        result.definition = Some(model);
+        if provider.api_key.is_empty() { return Err("所选模型服务未配置 API Key，请在设置页填写或选择其他模型".into()); }
+        if result.thinking_levels.is_empty() { return Err("所选模型没有可用的思考强度，请检查模型配置".into()); }
+        Ok(())
+    })();
+    if let Err(error) = inspect { result.error = error; }
+    result
+}
+
 fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("pi"))
 }
@@ -127,10 +188,12 @@ fn selected<'a>(models: &'a ModelsFile, settings: &SettingsFile) -> Result<&'a P
 }
 
 // 只读取应用配置目录，不读取项目 env，也不向前端返回已保存的 Key。
-pub fn read(app: &tauri::AppHandle) -> Result<ModelConfig, String> {
+pub fn read_for(app: &tauri::AppHandle, selection: &ModelSelection) -> Result<ModelConfig, String> {
     let state = app.state::<ConfigurationState>();
     let _guard = state.0.lock().map_err(|_| "配置锁异常")?;
-    let (models, settings) = load(app)?;
+    let (models, mut settings) = load(app)?;
+    settings.default_provider = selection.provider_id.clone();
+    settings.default_model = selection.model_id.clone();
     let provider = selected(&models, &settings)?;
     let mut secrets: Vec<String> = models.providers.values().map(|item| item.api_key.clone()).filter(|key| !key.is_empty()).collect();
     // JSON 日志中的引号和反斜杠会转义，原文与转义文本都需遮蔽。
@@ -142,7 +205,19 @@ pub fn read(app: &tauri::AppHandle) -> Result<ModelConfig, String> {
     Ok(ModelConfig { provider: settings.default_provider.clone(), model: settings.default_model.clone(), key: provider.api_key.clone(), secrets, definition: provider.clone(), settings })
 }
 
+pub fn read_session(app: &tauri::AppHandle, mod_id: &str, session_id: &str) -> Result<ModelConfig, String> {
+    let (selection, preferred) = crate::storage::repository::model_preferences(app, mod_id, session_id)?;
+    let state = session_model_state(app, selection, &preferred);
+    if !state.error.is_empty() { return Err(state.error); }
+    read_for(app, &state.selection)
+}
+
 impl ModelConfig {
+    pub fn model_definition(&self) -> Result<ModelDefinition, String> {
+        let mut provider = self.definition.clone();
+        restore_thinking_map(&mut provider);
+        provider.models.into_iter().find(|model| model.id == self.model).ok_or_else(|| "所选模型不存在".into())
+    }
     pub fn prepare(&self) -> Result<tempfile::TempDir, String> {
         // 每个进程独占配置快照；pi 的设置写入不会触及用户配置或其他进程。
         let root = tempfile::Builder::new().prefix("gen-mod-pi-").tempdir().map_err(|_| "无法创建运行时配置目录")?;

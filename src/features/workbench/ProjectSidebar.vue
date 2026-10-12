@@ -76,13 +76,13 @@ async function createSession(modId: string): Promise<void> {
             <SidebarMenuSub v-show="project.sessions.length && !collapsedProjects.has(project.modId)" :id="`project-sessions-${project.modId}`" class="mx-0 w-full translate-x-0 border-l-0 px-0">
               <SidebarMenuSubItem v-for="item in project.sessions" :key="item.sessionId" class="group/session relative">
                 <!-- 右侧操作区固定占位，标题只按实际剩余宽度截断。 -->
-                <SidebarMenuSubButton as-child :is-active="route.params.modId === project.modId && session.sessionId === item.sessionId" class="w-full translate-x-0 pl-3" :class="session.isBusy(project.modId, item.sessionId) ? 'pr-14' : 'pr-9'">
+                <SidebarMenuSubButton as-child :is-active="route.params.modId === project.modId && session.sessionId === item.sessionId" class="w-full translate-x-0 pr-14 pl-3">
                   <RouterLink :to="{ path: `/mods/${project.modId}/chat`, query: { session: item.sessionId } }" :title="`${item.name || '新会话'}${item.readOnly ? ' · 只读' : ''}`">
                     <span class="min-w-0 flex-1 truncate">{{ item.name || '新会话' }}{{ item.readOnly ? ' · 只读' : '' }}</span>
                   </RouterLink>
                 </SidebarMenuSubButton>
                 <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1">
-                  <span v-if="session.isBusy(project.modId, item.sessionId)" class="flex items-center [&>span]:mr-0"><SessionRunIndicator :busy="true" :label="session.stateFor(project.modId, item.sessionId)?.activity" /></span>
+                  <span class="flex size-4 items-center [&>span]:mr-0"><SessionRunIndicator :busy="session.isRunning(project.modId, item.sessionId)" :label="session.stateFor(project.modId, item.sessionId)?.activity" /></span>
                   <DropdownMenuRoot>
                     <DropdownMenuTrigger as-child>
                       <button type="button" :aria-label="`${item.name || '新会话'}的操作`" title="会话操作" class="flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/session:opacity-100 group-focus-within/session:opacity-100 data-[state=open]:opacity-100">

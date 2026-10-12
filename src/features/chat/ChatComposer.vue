@@ -1,15 +1,17 @@
 <script setup lang="ts">
+import type { ModelSelection, ProviderConfiguration, SessionModelState } from '@/contracts/config'
 import type { ContextUsage, PromptAttachment, ThinkingLevel } from '@/contracts/session'
-import { ArrowUp, Check, ChevronDown, FileText, Paperclip, Plus, Shrink, Square, X } from '@lucide/vue'
-import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger, PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
+import { ArrowUp, FileText, Paperclip, Plus, Shrink, Square, X } from '@lucide/vue'
+import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import ChatImage from './ChatImage.vue'
 import ContextUsageIndicator from './ContextUsageIndicator.vue'
+import ModelSelector from './ModelSelector.vue'
 
-const props = defineProps<{ attachments: PromptAttachment[], readingAttachments: boolean, working: boolean, canSteer: boolean, stopping: boolean, busy: boolean, configured: boolean, model: string, error: string, thinkingLevel: ThinkingLevel, thinkingLevels: ThinkingLevel[], contextUsage?: ContextUsage, compacting: boolean, canCompact: boolean }>()
-const emit = defineEmits<{ send: [], cancel: [], save: [], thinking: [level: ThinkingLevel], compact: [], files: [files: File[]], removeAttachment: [id: string] }>()
+const props = defineProps<{ attachments: PromptAttachment[], readingAttachments: boolean, working: boolean, canSteer: boolean, stopping: boolean, busy: boolean, configured: boolean, providers: ProviderConfiguration[], modelState?: SessionModelState, error: string, thinkingLevel: ThinkingLevel, thinkingLevels: ThinkingLevel[], contextUsage?: ContextUsage, compacting: boolean, canCompact: boolean }>()
+const emit = defineEmits<{ send: [], cancel: [], save: [], model: [selection: ModelSelection], thinking: [level: ThinkingLevel], compact: [], files: [files: File[]], removeAttachment: [id: string] }>()
 const requirement = defineModel<string>({ required: true })
 const picker = useTemplateRef<HTMLInputElement>('picker')
 const menuOpen = shallowRef(false)
@@ -21,7 +23,8 @@ const actions = computed(() => [
   { id: 'files', label: '选择文件', command: '/file', description: '图片、文本和源码', icon: Paperclip, disabled: props.readingAttachments },
   { id: 'compact', label: '压缩', command: '/compact', description: props.busy ? '会话空闲时可使用' : `压缩此聊天的上下文${contextPercent.value !== undefined ? `（已使用 ${contextPercent.value}%）` : ''}`, icon: Shrink, disabled: props.busy || !props.configured || !props.canCompact },
 ].filter(action => !slashMenu.value || `${action.label} ${action.command}`.toLowerCase().includes(slash.value?.[1]?.toLowerCase() ?? '')))
-const canSend = computed(() => (!props.busy || props.canSteer) && !props.readingAttachments && props.configured && (requirement.value.trim() || props.attachments.length))
+const imageError = computed(() => props.attachments.some(file => file.type === 'image') && props.modelState?.definition && !props.modelState.definition.input.includes('image') ? '当前模型不支持图片，请移除图片附件或切换模型' : '')
+const canSend = computed(() => (!props.busy || props.canSteer) && !props.readingAttachments && props.configured && !imageError.value && (requirement.value.trim() || props.attachments.length))
 watch(requirement, () => {
   if (slash.value) {
     slashMenu.value = true
@@ -94,7 +97,6 @@ function pasteFiles(event: ClipboardEvent): void {
     emit('files', files)
   }
 }
-const labels: Record<ThinkingLevel, string> = { off: '关闭', minimal: '最低', low: '低', medium: '中', high: '高', xhigh: '更高', max: '最高' }
 </script>
 
 <template>
@@ -120,24 +122,7 @@ const labels: Record<ThinkingLevel, string> = { off: '关闭', minimal: '最低'
             </PopoverTrigger>
             <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title="Enter 发送，Shift + Enter 换行">{{ working ? '可发送补充要求' : 'Enter 发送 · Shift + Enter 换行' }}</span>
             <ContextUsageIndicator :usage="contextUsage" :compacting="compacting" />
-            <span class="max-w-40 truncate text-xs text-foreground">{{ model }}</span>
-            <DropdownMenuRoot>
-              <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="sm" class="h-8 gap-1 rounded-lg px-2 text-xs text-muted-foreground" :disabled="busy || !thinkingLevels.length" aria-label="模型思考强度">
-                  <span>{{ labels[thinkingLevel] }}</span><ChevronDown class="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuPortal>
-                <DropdownMenuContent side="top" align="end" :side-offset="8" class="z-50 min-w-44 rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-md">
-                  <p class="px-3 pt-2 pb-1.5 text-xs text-muted-foreground">
-                    思考强度
-                  </p>
-                  <DropdownMenuItem v-for="level in thinkingLevels" :key="level" class="flex cursor-pointer items-center justify-between gap-6 rounded-lg px-3 py-2.5 text-sm outline-none data-[highlighted]:bg-muted" :class="thinkingLevel === level && 'bg-muted/60'" @select="!busy && level !== thinkingLevel && $emit('thinking', level)">
-                    <span>{{ labels[level] }}</span><Check v-if="thinkingLevel === level" class="size-4 text-muted-foreground" />
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenuPortal>
-            </DropdownMenuRoot>
+            <ModelSelector :providers="providers" :model-state="modelState" :thinking-level="thinkingLevel" :thinking-levels="thinkingLevels" :disabled="busy || !modelState" :thinking-disabled="busy || !configured" @select="$emit('model', $event)" @thinking="$emit('thinking', $event)" />
             <Button v-if="working || compacting" size="icon" class="size-8 rounded-full" :disabled="stopping" aria-label="停止会话" title="停止会话" @click="$emit('cancel')">
               <Square class="size-3.5 fill-current" />
             </Button>
@@ -145,8 +130,8 @@ const labels: Record<ThinkingLevel, string> = { off: '关闭', minimal: '最低'
               <ArrowUp class="size-4" />
             </Button>
           </div>
-          <p v-if="error" role="alert" class="mt-2 text-xs text-destructive">
-            {{ error }}
+          <p v-if="error || imageError" role="alert" class="mt-2 text-xs text-destructive">
+            {{ error || imageError }}
           </p>
         </div>
       </PopoverAnchor>

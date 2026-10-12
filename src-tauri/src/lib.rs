@@ -22,7 +22,7 @@ pub fn run() {
             storage::mods::create_mod, storage::mods::list_mods,
             storage::mods::get_mod, storage::mods::rename_mod,
             storage::mods::save_mod_draft,
-            storage::repository::save_session_thinking, storage::repository::read_session_metadata, storage::repository::list_migration_errors,
+            pi::bridge::save_session_thinking, pi::bridge::select_session_model, storage::repository::read_session_metadata, storage::repository::list_migration_errors,
             storage::repository::list_recovery_issues,
             pi::bridge::create_mod_session, pi::bridge::connect_pi, pi::bridge::send_pi_command,
             pi::bridge::disconnect_pi, pi::bridge::start_mod_task,

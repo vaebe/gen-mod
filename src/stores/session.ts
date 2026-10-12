@@ -47,6 +47,10 @@ export const useSessionStore = defineStore('session', () => {
   function isBusy(modId: string, sessionId: string): boolean {
     return stateFor(modId, sessionId)?.busy ?? false
   }
+  function isRunning(modId: string, sessionId: string): boolean {
+    const value = stateFor(modId, sessionId)
+    return !!value && (value.working || value.compacting)
+  }
   async function close(): Promise<void> {
     const value = selected.value
     const id = selectedKey.value
@@ -97,6 +101,10 @@ export const useSessionStore = defineStore('session', () => {
   } })
   const working = computed(() => selected.value.working)
   const busy = computed(() => selected.value.busy)
+  const modelState = computed(() => selected.value.modelState)
+  const modelChangeError = computed(() => selected.value.modelChangeError)
+  const selectModel = (...args: Parameters<ReturnType<typeof createSessionRuntime>['selectModel']>) => selected.value.selectModel(...args)
+  const refreshModel = () => selected.value.refreshModel()
   const switching = computed({ get: () => selected.value.switching, set: (value) => {
     selected.value.switching = value
   } })
@@ -144,5 +152,5 @@ export const useSessionStore = defineStore('session', () => {
   const stopping = computed(() => selected.value.stopping)
   const steeringInputs = computed(() => selected.value.steeringInputs)
   const anyBusy = computed(() => [...runtimes.values()].some(value => value.busy))
-  return { attachments, canSteer, stopping, steeringInputs, runtimes, selectedKey, stateFor, isBusy, anyBusy, open, close, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, send, abort, restart, flush, refreshStats, setThinking, compact }
+  return { attachments, canSteer, stopping, steeringInputs, runtimes, selectedKey, stateFor, isBusy, isRunning, anyBusy, open, close, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, modelState, modelChangeError, selectModel, refreshModel, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, send, abort, restart, flush, refreshStats, setThinking, compact }
 })

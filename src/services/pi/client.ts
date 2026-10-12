@@ -1,4 +1,5 @@
 import type { PiEnvelope, PiRecord } from './types'
+import type { ModelSelection, SessionModelState } from '@/contracts/config'
 import type { ImageInput, ThinkingLevel } from '@/contracts/session'
 import type { TaskContext } from '@/contracts/task'
 import { Channel } from '@tauri-apps/api/core'
@@ -121,6 +122,37 @@ export function createPiClient() {
     })
   }
 
+  async function selectModel(selection: ModelSelection): Promise<SessionModelState> {
+    rejectAll('正在切换模型')
+    minimumGeneration = generation.value + 1
+    connection.value = 'connecting'
+    try {
+      const result = await nativeCall<{ modelState: SessionModelState, generation: number | null }>('select_session_model', { ...identity, selection, onEvent: channel() })
+      if (result.generation === null) {
+        minimumGeneration = generation.value
+        connection.value = 'disconnected'
+        return result.modelState
+      }
+      generation.value = result.generation
+      connection.value = 'connected'
+      const state = await request('get_state')
+      const model = state.data?.model as { provider?: string, id?: string } | undefined
+      if (model?.provider !== selection.providerId || model.id !== selection.modelId) {
+        throw new Error('运行时未确认所选模型，请重新选择或重新连接')
+      }
+      const levels = await request('get_available_thinking_levels')
+      if (!Array.isArray(levels.data?.levels) || typeof state.data?.thinkingLevel !== 'string') {
+        throw new TypeError('运行时未返回模型思考强度，请重新连接')
+      }
+      return { ...result.modelState, thinkingLevel: state.data.thinkingLevel as ThinkingLevel, thinkingLevels: levels.data.levels as ThinkingLevel[] }
+    }
+    catch (cause) {
+      minimumGeneration = generation.value
+      connection.value = 'error'
+      throw cause
+    }
+  }
+
   /** 原生创建并绑定任务后才提交 prompt，普通 RPC 不能绕开此入口。 */
   async function prompt(modId: string, sessionId: string, requirement: string, thinkingLevel: ThinkingLevel, images: ImageInput[] = []): Promise<TaskContext> {
     rejectAll('正在开始新任务')
@@ -217,5 +249,5 @@ export function createPiClient() {
       listeners.delete(listener)
     }
   }
-  return { connection, submissionState, active, generation, select, connect, prompt, steer, request, disconnect, subscribe }
+  return { connection, submissionState, active, generation, select, selectModel, connect, prompt, steer, request, disconnect, subscribe }
 }

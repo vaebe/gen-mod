@@ -35,7 +35,20 @@ const attachments = computed({ get: () => session.attachments, set: (value: Prom
   session.attachments = value
 } })
 const projects = useProjectsStore()
-const connectionIssue = computed(() => error.value || session.error || configuration.error.value)
+const connectionIssue = computed(() => error.value || session.error || session.modelState?.error || configuration.error.value)
+const modelConfigured = computed(() => {
+  const selected = session.modelState
+  if (!selected || selected.error || session.modelChangeError) {
+    return false
+  }
+  return !!status.value?.providers.some(provider => provider.id === selected.selection.providerId && provider.keyConfigured && provider.models.some(model => model.id === selected.selection.modelId))
+})
+watch(() => [status.value, session.selectedKey], () => {
+  const target = session.stateFor(session.modId, session.sessionId)
+  if (target?.initialized) {
+    void target.refreshModel().catch(cause => target.error = cause.message)
+  }
+})
 const runtimeClosed = computed(() => connectionIssue.value === 'pi 进程已退出')
 const reconnectId = computed(() => session.sessionId || String(route.query.session ?? ''))
 watch(() => `${session.modId}/${session.sessionId}`, () => {
@@ -293,11 +306,11 @@ onBeforeRouteUpdate(leave)
     <p v-if="session.readOnly" class="border-t px-5 py-5 text-xs text-muted-foreground">
       此会话使用旧的能力上下文，只能查看历史。创建新会话继续开发。
     </p>
-    <ChatComposer v-else-if="project" v-model="requirement" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-steer="session.canSteer && !sending" :stopping="session.stopping" :busy="session.busy || sending" :configured="!!status?.keyConfigured && !opening" :model="status?.model || '未配置模型'" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @thinking="session.setThinking" @compact="session.compact" />
-    <p v-if="project && status && !status.keyConfigured" class="px-5 pb-3 text-xs text-muted-foreground">
-      请先在<RouterLink to="/settings" class="underline underline-offset-2">
+    <ChatComposer v-else-if="project" v-model="requirement" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-steer="session.canSteer && !sending" :stopping="session.stopping" :busy="session.busy || sending || opening" :configured="modelConfigured && !opening" :providers="status?.providers || []" :model-state="session.modelState" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @model="session.selectModel" @thinking="session.setThinking" @compact="session.compact" />
+    <p v-if="project && status && !modelConfigured" class="px-5 pb-3 text-xs text-muted-foreground">
+      请在输入框选择可用模型，或在<RouterLink to="/settings" class="underline underline-offset-2">
         设置页
-      </RouterLink>添加模型服务、填写 Key 并选择默认模型；当前需求仍会保存。
+      </RouterLink>完善模型服务和 Key；当前需求仍会保存。
     </p>
   </div>
 </template>

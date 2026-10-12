@@ -31,6 +31,7 @@ struct Process {
     consumed_inputs: std::collections::VecDeque<String>,
     confirming_input: Option<String>,
     stopping: bool,
+    model: crate::config::ModelDefinition,
 }
 #[derive(Default)]
 struct Inner { generation: u64, process: Option<Process> }
@@ -325,9 +326,6 @@ fn handle_record(app: &tauri::AppHandle, process: &mut Process, generation: u64,
     if record_type == "response" && record["command"] == "get_session_stats" && record["success"] == true {
         if record["data"]["contextUsage"].is_object() { crate::storage::repository::save_stats(app,&process.mod_id,&process.session_id,generation,&record["data"]["contextUsage"])?; }
     }
-    if record_type == "response" && record["command"] == "get_state" && record["success"] == true {
-        if let Some(level) = record["data"]["thinkingLevel"].as_str() { crate::storage::repository::save_preferences(app,&process.mod_id,&process.session_id,None,Some(level))?; }
-    }
     if record_type == "compaction_end" {
         crate::storage::repository::save_stats(app,&process.mod_id,&process.session_id,generation,&json!({"tokens":null,"percent":null,"contextWindow":null}))?;
     }
@@ -426,7 +424,8 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     let sessions = directory.join("logs/sessions");
     fs::create_dir_all(&sessions).map_err(|e| e.to_string())?;
     paths::reject_redirect(&sessions)?;
-    let config = crate::config::read(app)?;
+    let config = crate::config::read_session(app, mod_id, session_id)?;
+    let selected_model = config.model_definition()?;
     let configuration = config.prepare()?;
     let mut command = runtime::command(app, &source, &sessions, configuration.path())?;
     let project = mods::read_project(app, mod_id)?;
@@ -468,7 +467,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     let stdin = child.stdin.take().ok_or("pi stdin 未建立")?;
     let stdout = child.stdout.take().ok_or("pi stdout 未建立")?;
     let stderr = child.stderr.take().ok_or("pi stderr 未建立")?;
-    inner.process = Some(Process { child, stdin, _job: Some(job), _configuration: configuration, channel, mod_id: mod_id.into(), session_id: session_id.into(), task, active: false, compacting: false, prompt_id: None, tool_inputs: std::collections::BTreeMap::new(), app: app.clone(), pending_title: None, waiting_leases: vec![], command_baselines: Default::default(), steering: vec![], steering_queue: vec![], consumed_inputs: Default::default(), confirming_input: None, stopping: false });
+    inner.process = Some(Process { child, stdin, _job: Some(job), _configuration: configuration, channel, mod_id: mod_id.into(), session_id: session_id.into(), task, active: false, compacting: false, prompt_id: None, tool_inputs: std::collections::BTreeMap::new(), app: app.clone(), pending_title: None, waiting_leases: vec![], command_baselines: Default::default(), steering: vec![], steering_queue: vec![], consumed_inputs: Default::default(), confirming_input: None, stopping: false, model: selected_model });
     if let Some(process) = &inner.process {
         emit(process, generation, "diagnostic", json!({ "type": "runtime_started", "message": format!("启动 pi · 会话 {session_id} · 工作目录 {}", source.display()) }));
         if let Some(task) = &process.task { emit(process, generation, "task", json!({ "type": "task_started", "context": task.context })); }
@@ -636,6 +635,10 @@ fn session(app: &tauri::AppHandle, mod_id: &str, requested: Option<&str>) -> Res
     crate::storage::repository::update(app,mod_id,|project| {
         project.sessions.push(SessionReference { session_id: id.clone(), session_file: String::new(), skills, read_only: false, name: String::new() }); Ok(())
     })?;
+    let model = crate::config::session_model_state(app, None, "medium");
+    if !model.selection.provider_id.is_empty() && !model.selection.model_id.is_empty() {
+        crate::storage::repository::save_model(app, mod_id, &id, Some(&model.selection))?;
+    }
     Ok(id)
 }
 
@@ -655,14 +658,77 @@ pub fn connect_pi(app: tauri::AppHandle, state: tauri::State<PiState>, storage: 
     let mut inner = slot.0.lock().map_err(|_| "会话运行锁异常")?;
     if inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("目标会话正在运行".into()); }
     let metadata = crate::storage::repository::read_session_metadata(app.clone(),mod_id.clone(),id.clone())?;
+    if let Some(error) = metadata["modelState"]["error"].as_str().filter(|error| !error.is_empty()) { return Err(error.into()); }
+    let selection = serde_json::from_value::<crate::config::ModelSelection>(metadata["modelState"]["selection"].clone()).map_err(|e| e.to_string())?;
+    crate::storage::repository::save_model(&app, &mod_id, &id, Some(&selection))?;
     let generation = spawn(&app, &slot, &mut inner, &mod_id, &id, on_event, None)?;
     if let Some(process) = inner.process.as_mut() {
-        writeln!(process.stdin, "{}", json!({ "type": "set_thinking_level", "level": metadata["thinkingLevel"], "id": format!("native-thinking-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
+        writeln!(process.stdin, "{}", json!({ "type": "set_thinking_level", "level": metadata["modelState"]["thinkingLevel"], "id": format!("native-thinking-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
+        writeln!(process.stdin, "{}", json!({ "type": "get_available_thinking_levels", "id": format!("native-levels-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
         writeln!(process.stdin, "{}", json!({ "type": "set_auto_compaction", "enabled": true, "id": format!("native-auto-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
         writeln!(process.stdin, "{}", json!({ "type": "get_state", "id": format!("native-state-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
         process.stdin.flush().map_err(|e| e.to_string())?;
     }
     Ok(Identity { mod_id, session_id: id, generation })
+}
+
+#[tauri::command]
+pub fn save_session_thinking(app: tauri::AppHandle, state: tauri::State<PiState>, storage: tauri::State<StorageState>, mod_id: String, session_id: String, level: String) -> Result<(), String> {
+    let slot = state.0.slot(&mod_id, &session_id)?;
+    let inner = slot.lock().map_err(|_| "会话运行锁异常")?;
+    if inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.stopping || p.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("请等待会话空闲后操作".into()); }
+    let _storage = storage.0.lock().map_err(|_| "项目存储锁异常")?;
+    session(&app, &mod_id, Some(&session_id))?;
+    let (selection, preferred) = crate::storage::repository::model_preferences(&app, &mod_id, &session_id)?;
+    let model = crate::config::session_model_state(&app, selection, &preferred);
+    if !model.error.is_empty() { return Err(model.error); }
+    if !model.thinking_levels.contains(&level) { return Err("模型不支持此思考强度".into()); }
+    crate::storage::repository::save_preferences(&app, &mod_id, &session_id, None, Some(&level))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelChange {
+    model_state: crate::config::SessionModelState,
+    generation: Option<u64>,
+}
+
+/// 只替换空闲聊天的运行时配置；失败恢复模型记录，不重放任何输入。
+#[tauri::command]
+pub fn select_session_model(app: tauri::AppHandle, state: tauri::State<PiState>, storage: tauri::State<StorageState>, mod_id: String, session_id: String, selection: crate::config::ModelSelection, on_event: Channel<Envelope>) -> Result<ModelChange, String> {
+    let slot = SlotState(state.0.slot(&mod_id, &session_id)?);
+    let mut inner = slot.0.lock().map_err(|_| "会话运行锁异常")?;
+    if inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.stopping || p.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("请等待会话空闲后操作".into()); }
+    let _storage = storage.0.lock().map_err(|_| "项目存储锁异常")?;
+    session(&app, &mod_id, Some(&session_id))?;
+    let (previous, preferred) = crate::storage::repository::model_preferences(&app, &mod_id, &session_id)?;
+    let model_state = crate::config::session_model_state(&app, Some(selection.clone()), &preferred);
+    if !model_state.error.is_empty() { return Err(model_state.error); }
+    // 准备配置前完成凭据校验，密钥不会返回前端。
+    crate::config::read_for(&app, &selection)?;
+    let reconnect = inner.process.is_some();
+    if reconnect { stop(&app, &mut inner)?; }
+    crate::storage::repository::save_model(&app, &mod_id, &session_id, Some(&selection))?;
+    let changed = (|| -> Result<Option<u64>, String> {
+        if !reconnect { return Ok(None); }
+        let generation = spawn(&app, &slot, &mut inner, &mod_id, &session_id, on_event, None)?;
+        let process = inner.process.as_mut().ok_or("运行时未建立")?;
+        writeln!(process.stdin, "{}", json!({"type":"set_thinking_level","level":model_state.thinking_level,"id":format!("native-thinking-{}",uuid::Uuid::new_v4())})).map_err(|e| e.to_string())?;
+        writeln!(process.stdin, "{}", json!({"type":"set_auto_compaction","enabled":true,"id":format!("native-auto-{}",uuid::Uuid::new_v4())})).map_err(|e| e.to_string())?;
+        writeln!(process.stdin, "{}", json!({"type":"get_available_thinking_levels","id":format!("native-levels-{}",uuid::Uuid::new_v4())})).map_err(|e| e.to_string())?;
+        writeln!(process.stdin, "{}", json!({"type":"get_state","id":format!("native-state-{}",uuid::Uuid::new_v4())})).map_err(|e| e.to_string())?;
+        process.stdin.flush().map_err(|e| e.to_string())?;
+        Ok(Some(generation))
+    })();
+    match changed {
+        Ok(generation) => Ok(ModelChange { model_state, generation }),
+        Err(error) => {
+            let cleanup = stop(&app, &mut inner);
+            crate::storage::repository::save_model(&app, &mod_id, &session_id, previous.as_ref()).map_err(|rollback| format!("{error}；恢复模型记录失败：{rollback}"))?;
+            cleanup.map_err(|cleanup| format!("{error}；回收运行时失败：{cleanup}"))?;
+            Err(format!("模型切换失败，已恢复原选择；{error}"))
+        }
+    }
 }
 
 #[tauri::command]
@@ -674,7 +740,7 @@ pub fn send_pi_command(app: tauri::AppHandle, state: tauri::State<PiState>, mod_
     let kind = command["type"].as_str().ok_or("RPC 缺少类型")?;
     if !matches!(kind, "get_state" | "get_messages" | "get_commands" | "get_entries" | "get_tree" | "get_session_stats" | "get_available_thinking_levels" | "set_thinking_level" | "compact" | "abort" | "extension_ui_response") { return Err("此 RPC 命令不能由前端直接发送".into()) }
     if matches!(kind, "compact" | "set_thinking_level") && (process.active || process.compacting || process.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("请等待会话空闲后操作".into()); }
-    if kind == "set_thinking_level" && !matches!(command["level"].as_str(), Some("off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max")) { return Err("无效的思考强度".into()); }
+    if kind == "set_thinking_level" && !process.model.thinking_levels().iter().any(|level| command["level"].as_str() == Some(level.as_str())) { return Err("模型不支持此思考强度".into()); }
     if command["id"].as_str().is_none() { return Err("RPC 缺少请求 ID".into()) }
     if kind=="abort" {
         emit(process,generation,"record",json!({"type":"response","command":"abort","id":command["id"],"success":true}));
@@ -695,6 +761,8 @@ pub fn send_pi_command(app: tauri::AppHandle, state: tauri::State<PiState>, mod_
 pub fn disconnect_pi(app: tauri::AppHandle, state: tauri::State<PiState>, mod_id: String, session_id: String, generation: u64) -> Result<(), String> {
     let slot = state.0.slot(&mod_id,&session_id)?;
     let mut inner = slot.lock().map_err(|_| "运行时锁异常")?;
+    // 模型切换启动失败后原生代次可能已增加，但已回收的槽不再需要停止。
+    if inner.process.is_none() { return Ok(()); }
     if inner.generation != generation { return Err("连接已被替换".into()); }
     stop(&app, &mut inner)
 }
@@ -733,6 +801,7 @@ pub fn steer_mod_task(app: tauri::AppHandle, state: tauri::State<PiState>, mod_i
     if task.context.task_id != task_id || task.status != "running" || !process.active || process.compacting || process.stopping { return Err("任务无法接收引导，请保留输入后重试或发送新需求".into()); }
     let repository = crate::storage::repository::list_steering_inputs(app.clone(),mod_id.clone(),session_id.clone())?;
     if repository.iter().any(|v|v["inputId"]==input_id) { return Err("引导 ID 已提交，不自动重发".into()); }
+    if !images.is_empty() && !process.model.input.iter().any(|input| input == "image") { return Err("当前模型不支持图片，请移除图片附件或切换模型".into()); }
     let fingerprint = input_fingerprint(&json!({"content":[{"type":"text","text":message}]}),Some(&images))?;
     let mut input = json!({"inputId":input_id,"modId":mod_id,"sessionId":session_id,"taskId":task_id,"generation":generation,"submittedAt":mods::now()?,"message":message,"fingerprint":fingerprint,"status":"submitted"});
     crate::storage::repository::steering(&app,&input)?;
@@ -809,12 +878,14 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
     if inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("已有任务正在运行，请先取消或等待结束".into()) }
     let _storage = storage.0.lock().map_err(|_| "项目存储锁异常")?;
     mods::read_project(&app, &mod_id)?;
-    // 页面已经保存原始草稿；prompt 含附件展开文本，不能把它写回输入框草稿。
-    crate::storage::repository::save_preferences(&app,&mod_id,&session_id,None,Some(&thinking_level))?;
     if requirement.trim().is_empty() { return Err("需求不能为空".into()) }
     if !matches!(thinking_level.as_str(), "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") { return Err("无效的思考强度".into()); }
-    crate::config::read(&app).map_err(|error| format!("需求已保存；{error}"))?;
     let id = session(&app, &mod_id, Some(&session_id))?;
+    let config = crate::config::read_session(&app, &mod_id, &id).map_err(|error| format!("需求已保存；{error}"))?;
+    let model = config.model_definition()?;
+    if !model.thinking_levels().contains(&thinking_level) { return Err("模型不支持此思考强度，请重新选择".into()); }
+    if !images.is_empty() && !model.input.iter().any(|input| input == "image") { return Err("当前模型不支持图片，请移除图片附件或切换模型".into()); }
+    crate::storage::repository::save_model(&app, &mod_id, &id, Some(&crate::config::ModelSelection { provider_id: config.provider, model_id: config.model }))?;
     let project = mods::read_project(&app, &mod_id)?;
     let directory = paths::project_dir(&app, &mod_id)?;
     let task_id = uuid::Uuid::new_v4().to_string();
@@ -856,6 +927,7 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
     process.active = false;
     writeln!(process.stdin, "{}", json!({ "type": "set_auto_compaction", "enabled": true, "id": format!("native-auto-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
     writeln!(process.stdin, "{}", json!({ "type": "set_thinking_level", "level": thinking_level, "id": format!("native-thinking-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
+    writeln!(process.stdin, "{}", json!({ "type": "get_available_thinking_levels", "id": format!("native-levels-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
     writeln!(process.stdin, "{}", json!({ "type": "get_state", "id": format!("native-state-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
     writeln!(process.stdin,"{}",json!({"type":"set_steering_mode","mode":"one-at-a-time","id":format!("native-steering-{}",uuid::Uuid::new_v4())})).map_err(|e|e.to_string())?;
     writeln!(process.stdin, "{}", json!({ "type": "prompt", "id": request_id, "message": requirement, "images": images })).map_err(|e| e.to_string())?;

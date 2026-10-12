@@ -1,3 +1,5 @@
+import type { ThinkingLevel } from './session'
+
 export type ProviderApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai'
 
 export const providerApis: { value: ProviderApi, label: string }[] = [
@@ -15,6 +17,19 @@ export interface ModelDefinition {
   reasoning: boolean
   input: ('text' | 'image')[]
   thinkingLevelMap?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>
+}
+
+export interface ModelSelection {
+  providerId: string
+  modelId: string
+}
+
+export interface SessionModelState {
+  selection: ModelSelection
+  definition?: ModelDefinition
+  error: string
+  thinkingLevel: ThinkingLevel
+  thinkingLevels: ThinkingLevel[]
 }
 
 export interface ModelForm extends Omit<ModelDefinition, 'contextWindow' | 'maxTokens'> {

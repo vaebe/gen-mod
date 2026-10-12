@@ -1,3 +1,4 @@
+import type { ModelSelection, SessionModelState } from '@/contracts/config'
 import type { ContextUsage, ImageInput, PromptAttachment, SteeringInput, ThinkingLevel } from '@/contracts/session'
 import type { TaskContext } from '@/contracts/task'
 import type { PiEnvelope, PiRecord } from '@/services/pi/types'
@@ -30,6 +31,10 @@ export function createSessionRuntime() {
   const compacting = shallowRef(false)
   const manualCompaction = shallowRef(false)
   const changingThinking = shallowRef(false)
+  const changingModel = shallowRef(false)
+  const modelState = shallowRef<SessionModelState>()
+  const modelChangeError = shallowRef('')
+  let modelEpoch = 0
   const thinkingLevel = shallowRef<ThinkingLevel>('medium')
   const thinkingLevels = shallowRef<ThinkingLevel[]>([])
   const contextUsage = shallowRef<ContextUsage>()
@@ -44,7 +49,7 @@ export function createSessionRuntime() {
   const loadedSkills = shallowRef<string[]>([])
   let abortTimer: ReturnType<typeof setTimeout> | undefined
   const working = computed(() => submitting.value || client.active.value || client.submissionState.value === 'running' || client.submissionState.value === 'queued')
-  const busy = computed(() => working.value || compacting.value || manualCompaction.value || switching.value || changingThinking.value)
+  const busy = computed(() => working.value || compacting.value || manualCompaction.value || switching.value || changingThinking.value || changingModel.value)
   let statsPending = false
   let statsAgain = false
   let statsEpoch = 0
@@ -168,6 +173,9 @@ export function createSessionRuntime() {
       if (record.type === 'thinking_level_changed' && typeof record.level === 'string') {
         thinkingLevel.value = record.level as ThinkingLevel
       }
+      if (record.type === 'response' && record.command === 'get_available_thinking_levels' && record.success && Array.isArray(record.data?.levels)) {
+        thinkingLevels.value = record.data.levels as ThinkingLevel[]
+      }
       if (record.type === 'response' && record.command === 'get_state' && record.success) {
         compacting.value = record.data?.isCompacting === true
         autoCompaction.value = record.data?.autoCompactionEnabled !== false
@@ -281,23 +289,85 @@ export function createSessionRuntime() {
       statsEpoch += 1
       thinkingLevels.value = []
       thinkingLevel.value = 'medium'
+      modelEpoch += 1
+      modelState.value = undefined
+      modelChangeError.value = ''
       startedAt.value = undefined
       endedAt.value = undefined
       const targetId = id ?? await nativeCall<string>('create_mod_session', { modId: projectId })
       sessionId.value = targetId
       const [history, metadata] = await Promise.all([
         nativeCall<{ messages: unknown[] }>('read_session_history', { modId: projectId, sessionId: targetId }),
-        nativeCall<{ thinkingLevel: ThinkingLevel, contextUsage?: ContextUsage, generation: number }>('read_session_metadata', { modId: projectId, sessionId: targetId }),
+        nativeCall<{ modelState: SessionModelState, contextUsage?: ContextUsage, generation: number }>('read_session_metadata', { modId: projectId, sessionId: targetId }),
       ])
       chat.value = restoreChat(history.messages)
       contextUsage.value = metadata.contextUsage ? { ...metadata.contextUsage, historical: true } : undefined
-      thinkingLevel.value = metadata.thinkingLevel
-      thinkingLevels.value = ['low', 'medium', 'high']
+      applyModel(metadata.modelState)
       client.select(projectId, targetId, metadata.generation)
       await refreshInputs()
       initialized.value = true
     }
     finally { switching.value = false }
+  }
+
+  function applyModel(value: SessionModelState): void {
+    modelState.value = value
+    thinkingLevel.value = value.thinkingLevel
+    thinkingLevels.value = value.thinkingLevels
+  }
+
+  async function refreshModel(): Promise<void> {
+    if (busy.value || !initialized.value) {
+      return
+    }
+    const projectId = modId.value
+    const id = sessionId.value
+    const epoch = ++modelEpoch
+    const metadata = await nativeCall<{ modelState: SessionModelState }>('read_session_metadata', { modId: projectId, sessionId: id })
+    if (epoch !== modelEpoch || projectId !== modId.value || id !== sessionId.value || busy.value) {
+      return
+    }
+    if (client.connection.value === 'connected') {
+      modelState.value = metadata.modelState
+    }
+    else { applyModel(metadata.modelState) }
+  }
+
+  async function selectModel(selection: ModelSelection): Promise<void> {
+    if (busy.value || readOnly.value) {
+      return
+    }
+    const projectId = modId.value
+    const id = sessionId.value
+    const epoch = ++modelEpoch
+    changingModel.value = true
+    error.value = ''
+    restartAvailable.value = false
+    try {
+      const value = await client.selectModel(selection)
+      if (epoch !== modelEpoch || projectId !== modId.value || id !== sessionId.value) {
+        return
+      }
+      applyModel(value)
+      modelChangeError.value = ''
+      statsEpoch += 1
+      contextUsage.value = undefined
+      if (client.connection.value === 'connected') {
+        await refreshStats()
+      }
+    }
+    catch (cause) {
+      if (epoch === modelEpoch && projectId === modId.value && id === sessionId.value) {
+        modelChangeError.value = (cause as Error).message
+        error.value = modelChangeError.value
+        restartAvailable.value = true
+      }
+    }
+    finally {
+      if (epoch === modelEpoch) {
+        changingModel.value = false
+      }
+    }
   }
 
   /** 事件触发的统计请求合并，旧连接的数据不得覆盖当前会话。 */
@@ -343,10 +413,8 @@ export function createSessionRuntime() {
         await client.request('set_thinking_level', { level })
         await client.request('get_state')
       }
-      else {
-        await nativeCall('save_session_thinking', { modId: modId.value, sessionId: sessionId.value, level })
-        thinkingLevel.value = level
-      }
+      await nativeCall('save_session_thinking', { modId: modId.value, sessionId: sessionId.value, level })
+      thinkingLevel.value = level
     }
     catch (cause) { error.value = (cause as Error).message }
     finally { changingThinking.value = false }
@@ -394,6 +462,12 @@ export function createSessionRuntime() {
   async function send(requirement: string, images: ImageInput[] = [], saveDraft?: () => Promise<boolean>): Promise<void> {
     if (readOnly.value) {
       throw new Error('此会话只能查看历史，请新建会话')
+    }
+    if (!modelState.value || modelState.value.error || modelChangeError.value) {
+      throw new Error(modelChangeError.value || modelState.value?.error || '请先选择模型')
+    }
+    if (images.length && !modelState.value.definition?.input.includes('image')) {
+      throw new Error('当前模型不支持图片，请移除图片附件或切换模型')
     }
     if (working.value) {
       await steer(requirement, images, saveDraft)
@@ -482,5 +556,5 @@ export function createSessionRuntime() {
     flush()
     await open(project, id)
   }
-  return { initialized, attachments, steeringInputs, stopping, canSteer, steeringSubmitting, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, open, send, abort, restart, flush, refreshStats, setThinking, compact, close }
+  return { initialized, attachments, steeringInputs, stopping, canSteer, steeringSubmitting, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, changingModel, modelState, modelChangeError, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, open, send, abort, restart, flush, refreshStats, refreshModel, selectModel, setThinking, compact, close }
 }

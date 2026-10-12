@@ -128,12 +128,25 @@ pub fn save_preferences(app: &tauri::AppHandle, mod_id: &str, session_id: &str, 
     let count = db.execute("UPDATE sessions SET draft=COALESCE(?3,draft),thinking_level=COALESCE(?4,thinking_level) WHERE mod_id=?1 AND session_id=?2 AND deleted=0",params![mod_id,session_id,draft,thinking]).map_err(|e| e.to_string())?;
     if count != 1 { return Err("会话不存在或已删除".into()); } Ok(())
 }
-#[tauri::command]
-pub fn save_session_thinking(app: tauri::AppHandle, mod_id: String, session_id: String, level: String) -> Result<(),String> {
-    let project=read(&app,&mod_id)?;
-    if project.sessions.iter().find(|s|s.session_id==session_id).ok_or("会话不属于项目")?.read_only { return Err("会话只读".into()); }
-    if !matches!(level.as_str(),"low"|"medium"|"high") { return Err("无效的思考强度".into()); }
-    save_preferences(&app,&mod_id,&session_id,None,Some(&level))
+pub fn model_preferences(app: &tauri::AppHandle, mod_id: &str, session_id: &str) -> Result<(Option<crate::config::ModelSelection>, String), String> {
+    let db = database::connect(app)?;
+    let (provider, model, thinking): (Option<String>, Option<String>, String) = db.query_row("SELECT provider_id,model_id,thinking_level FROM sessions WHERE mod_id=?1 AND session_id=?2 AND deleted=0", params![mod_id,session_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|e| e.to_string())?;
+    let selection = match (provider, model) {
+        (Some(provider_id), Some(model_id)) => Some(crate::config::ModelSelection { provider_id, model_id }),
+        (None, None) => None,
+        _ => return Err("会话模型记录不完整，请检查数据库".into()),
+    };
+    Ok((selection, thinking))
+}
+
+pub fn save_model(app: &tauri::AppHandle, mod_id: &str, session_id: &str, selection: Option<&crate::config::ModelSelection>) -> Result<(), String> {
+    let mut db = database::connect(app)?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    // 更换模型后旧的上下文窗口统计不再适用，不能在重开聊天时继续显示。
+    tx.execute("DELETE FROM session_stats WHERE mod_id=?1 AND session_id=?2 AND EXISTS(SELECT 1 FROM sessions WHERE mod_id=?1 AND session_id=?2 AND (provider_id IS NOT ?3 OR model_id IS NOT ?4))", params![mod_id,session_id,selection.map(|value| &value.provider_id),selection.map(|value| &value.model_id)]).map_err(|e| e.to_string())?;
+    let count = tx.execute("UPDATE sessions SET provider_id=?3,model_id=?4 WHERE mod_id=?1 AND session_id=?2 AND deleted=0", params![mod_id,session_id,selection.map(|value| &value.provider_id),selection.map(|value| &value.model_id)]).map_err(|e| e.to_string())?;
+    if count != 1 { return Err("会话不存在或已删除".into()); }
+    tx.commit().map_err(|e| e.to_string())
 }
 #[tauri::command]
 pub fn read_session_metadata(app: tauri::AppHandle, mod_id: String, session_id: String) -> Result<serde_json::Value,String> {
@@ -141,7 +154,9 @@ pub fn read_session_metadata(app: tauri::AppHandle, mod_id: String, session_id: 
     let db = database::connect(&app)?;
     let (draft,thinking,generation):(String,String,i64) = db.query_row("SELECT draft,thinking_level,generation FROM sessions WHERE mod_id=?1 AND session_id=?2",params![mod_id,session_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|e|e.to_string())?;
     let stats: Option<String> = db.query_row("SELECT payload FROM session_stats WHERE mod_id=?1 AND session_id=?2",params![mod_id,session_id],|r|r.get(0)).optional().map_err(|e|e.to_string())?;
-    Ok(serde_json::json!({"draft":draft,"thinkingLevel":thinking,"generation":generation,"contextUsage":stats.map(decode::<serde_json::Value>).transpose()?}))
+    let (selection, _) = model_preferences(&app, &mod_id, &session_id)?;
+    let model_state = crate::config::session_model_state(&app, selection, &thinking);
+    Ok(serde_json::json!({"draft":draft,"thinkingLevel":thinking,"modelState":model_state,"generation":generation,"contextUsage":stats.map(decode::<serde_json::Value>).transpose()?}))
 }
 pub fn save_stats(app: &tauri::AppHandle, mod_id: &str, session_id: &str, generation: u64, usage: &serde_json::Value) -> Result<(),String> {
     let db = database::connect(app)?;
