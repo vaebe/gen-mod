@@ -8,8 +8,7 @@
 - Vue 3 + TypeScript + Vite 8 + Tauri 2；shadcn-vue + Tailwind CSS 4；Pinia、Vue Router、markstream-vue。图标使用现有 `@lucide/vue`，不要引入另一个图标包。
 - 当前使用 pnpm 11.17.0；参考 Orbit 的 pi 使用方式，不因 Orbit 使用 Bun 而切换包管理器。
 - 内置 Node 22.19.0 Windows x64 与 `@earendil-works/pi-coding-agent` 1.1.0。Agent 执行使用 RPC，SDK helper 仅用于只读历史投影。
-- 模型使用 Step Plan 的 OpenAI Responses API；默认 `https://api.stepfun.com/step_plan/v1`、`step-5-preview`。API Key 从 `.env` 设置，由用户配置，不作为无凭据阶段的实现卡点。
-- `step-5-preview` 配置文本和图片输入，思考强度 low / medium / high，默认 medium；上下文上限 1,000,000，输出上限 64,000。不要将这些参数套用到其他模型。
+- 模型服务由用户在设置页弹窗配置，支持多个 provider 和模型；用户选择默认模型，不再固定 StepFun 或读取 `.env`。模型 ID、上下文、最大输出、图片输入和推理能力按服务商规格填写。
 - 游戏能力由通用 skills + 对应游戏 skills 扩展。优先逃离鸭科夫；不要在 Vue/Rust 中为每个游戏编写执行分支。
 - 开发项目不强制安装游戏。游戏内测试和效果验收由用户负责；构建需求、验证步骤、安装清单由 skills 规范。
 - MOD 源码必须持续复用，不能每轮重新初始化或清除。交付版本隔离，提供简单管理面板与用户点击安装入口。版本数量不限制，由用户手动删除，不自动清理旧版本。
@@ -75,7 +74,6 @@
 ```text
 应用数据目录/
   gen-mod.sqlite3                 应用元数据（WAL，配套 -wal / -shm）
-  pi/config/models.json            模型配置，Key 仅引用环境变量
   mods/<modId>/
     mod.json                      旧迁移源，保留但不再活动写入
     source/                       所有轮次共用的源码工作区
@@ -85,7 +83,8 @@
 ```
 
 - 版本文件与 ZIP 的实际目录由 `src-tauri/src/artifacts/registry.rs` 管理；登记后的内容不可变，用户可以删除应用内的版本包，安装走预览与直接覆盖流程。
-- 开发 `.env`：项目根目录；发布 `.env`：Tauri 应用配置目录。API Key 不返回给前端，命令子进程移除 Key，日志做脱敏。`.env` 是文件配置，不宣称凭据加密。
+- 模型配置在 Tauri `app_config_dir/pi/models.json` 和 `settings.json`，开发与发布使用相同目录。设置页支持添加、编辑、移除 provider 和模型，默认模型与列表统一保存；下次任务启动读取新值，活动任务不被打断。已保存的 Key 不返回前端，编辑留空保留原 Key；凭据为本机明文文件，命令子进程移除应用传入的 Key，日志脱敏。未配置模型或 Key 仍可管理项目和保存草稿。
+- pi 使用每个进程独占的临时配置快照，仅包含当前 provider/模型和 Key 环境变量引用，退出后清理；设置写入不触及应用持久化配置。命令后代移除 Key、全部 Key 的脱敏集合和配置目录变量；命令日志及原生事件按启动时凭据快照脱敏。模型的 thinkingLevelMap 保留，原 Step Plan step-5-preview 限制为 low / medium / high。
 - pi 会话 JSONL 是历史权威，SQLite sessions 保存 sessionId / sessionFile / 标题 / skill 快照关联；不重写正式历史。
 - 有历史文件时启动只传 `--session <文件>`；无文件时使用 `--session-id <ID>`。两者互斥，同时传入会使 pi 退出。
 - 连接失败仍保留目标 ID；重新连接只重试已选会话，不能用空 ID 隐式新建。

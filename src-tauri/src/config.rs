@@ -1,90 +1,252 @@
-use serde::Serialize;
-use std::{collections::HashMap, fs, path::PathBuf};
+use serde::{Deserialize, Serialize};
+use std::{collections::{BTreeMap, HashSet}, fs, path::PathBuf, sync::Mutex};
 use tauri::Manager;
 
-pub struct ModelConfig {
-    pub base_url: String,
-    pub model: String,
-    pub key: String,
-    pub env_path: PathBuf,
+#[derive(Default)]
+pub struct ConfigurationState(pub Mutex<()>);
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDefinition {
+    pub id: String,
+    pub name: String,
+    pub context_window: u32,
+    pub max_tokens: u32,
+    pub reasoning: bool,
+    pub input: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub thinking_level_map: BTreeMap<String, Option<String>>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Provider {
+    name: String,
+    base_url: String,
+    api: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    api_key: String,
+    models: Vec<ModelDefinition>,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct ModelsFile {
+    providers: BTreeMap<String, Provider>,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsFile {
+    #[serde(default)]
+    default_provider: String,
+    #[serde(default)]
+    default_model: String,
+    #[serde(flatten)]
+    other: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderConfiguration {
+    id: String,
+    name: String,
+    base_url: String,
+    api: String,
+    #[serde(default, skip_serializing)]
+    api_key: Option<String>,
+    #[serde(default)]
+    key_configured: bool,
+    models: Vec<ModelDefinition>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveConfiguration {
+    providers: Vec<ProviderConfiguration>,
+    default_provider: String,
+    default_model: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigurationStatus {
-    base_url: String,
+    providers: Vec<ProviderConfiguration>,
+    default_provider: String,
+    default_model: String,
     model: String,
     key_configured: bool,
-    env_path: String,
+    configuration_directory: String,
     runtime_version: String,
     node_version: String,
     runtime_prepared: bool,
 }
 
-/// 显式读取 env 文件，不改变宿主环境，不把凭据返回给前端。
-pub fn read(app: &tauri::AppHandle) -> Result<ModelConfig, String> {
-    let path = if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.env")
-    } else {
-        app.path().app_config_dir().map_err(|e| e.to_string())?.join(".env")
-    };
-    let mut fields = HashMap::new();
-    if path.exists() {
-        let iterator = dotenvy::from_path_iter(&path).map_err(|_| "无法读取 env 配置文件")?;
-        for field in iterator {
-            let (key, value) = field.map_err(|_| "env 配置格式错误，请检查引号及赋值格式")?;
-            fields.insert(key, value);
+pub struct ModelConfig {
+    pub provider: String,
+    pub model: String,
+    pub key: String,
+    pub secrets: Vec<String>,
+    definition: Provider,
+    settings: SettingsFile,
+}
+
+fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("pi"))
+}
+
+fn load(app: &tauri::AppHandle) -> Result<(ModelsFile, SettingsFile), String> {
+    let root = directory(app)?;
+    fn read<T: serde::de::DeserializeOwned + Default>(path: PathBuf) -> Result<T, String> {
+        match fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| format!("{} 格式错误", path.file_name().unwrap_or_default().to_string_lossy())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
+            Err(_) => Err("无法读取模型配置文件".into()),
         }
     }
-    let base_url = fields.remove("STEPFUN_BASE_URL").unwrap_or_else(|| "https://api.stepfun.com/step_plan/v1".into()).trim_end_matches('/').to_string();
-    let model = fields.remove("STEPFUN_MODEL").unwrap_or_else(|| "step-5-preview".into());
-    let key = fields.remove("STEPFUN_API_KEY").unwrap_or_default().trim().to_string();
-    if key.chars().any(|c| c.is_whitespace() || c.is_control()) { return Err("STEPFUN_API_KEY 不能包含空白或控制字符".into()); }
-    let url = tauri::Url::parse(&base_url).map_err(|_| "STEPFUN_BASE_URL 不是有效 URL")?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
-        return Err("STEPFUN_BASE_URL 应为不含凭据、查询或片段的 HTTP(S) 地址".into());
-    }
-    if model.trim().is_empty() || model.contains(['\n', '\r']) { return Err("STEPFUN_MODEL 不能为空或包含换行".into()); }
-    Ok(ModelConfig { base_url, model, key, env_path: path })
+    Ok((read(root.join("models.json"))?, read(root.join("settings.json"))?))
 }
 
-pub fn prepare(app: &tauri::AppHandle, config: &ModelConfig) -> Result<PathBuf, String> {
-    let directory = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("pi/config");
-    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-    let mut model = serde_json::json!({ "id": config.model });
-    if config.model == "step-5-preview" {
-        model["input"] = serde_json::json!(["text", "image"]);
-        // StepFun 官方 Step 5 规格：1M 上下文、64k 输出、low/medium/high。
-        model["reasoning"] = serde_json::json!(true);
-        model["contextWindow"] = serde_json::json!(1_000_000);
-        model["maxTokens"] = serde_json::json!(64_000);
-        model["thinkingLevelMap"] = serde_json::json!({ "off": null, "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": null, "max": null });
+fn restore_thinking_map(provider: &mut Provider) {
+    // 恢复原 Step Plan 协议约束，不将同名模型或参数套用到其他服务。
+    if provider.api != "openai-responses" || provider.base_url.trim_end_matches('/') != "https://api.stepfun.com/step_plan/v1" { return; }
+    for model in &mut provider.models {
+        if model.id == "step-5-preview" && model.reasoning && model.thinking_level_map.is_empty() {
+            model.thinking_level_map = ["off", "minimal", "low", "medium", "high", "xhigh", "max"].into_iter()
+                .map(|level| (level.into(), if matches!(level, "low" | "medium" | "high") { Some(level.into()) } else { None })).collect();
+        }
     }
-    let provider = serde_json::json!({ "providers": { "stepfun-plan": {
-        "baseUrl": config.base_url, "api": "openai-responses", "apiKey": "$STEPFUN_API_KEY",
-        "models": [model]
-    }}});
-    crate::storage::mods::write_json(&directory.join("models.json"), &provider)?;
-    Ok(directory)
 }
 
-#[tauri::command]
-pub fn get_configuration(app: tauri::AppHandle) -> Result<ConfigurationStatus, String> {
-    let config = read(&app)?;
-    let root = crate::pi::runtime::resources(&app)?;
+fn selected<'a>(models: &'a ModelsFile, settings: &SettingsFile) -> Result<&'a Provider, String> {
+    let provider = models.providers.get(&settings.default_provider).ok_or("请在设置页添加 provider 并选择默认模型")?;
+    if !provider.models.iter().any(|model| model.id == settings.default_model) {
+        return Err("默认模型不存在，请在设置页重新选择".into());
+    }
+    if provider.api_key.is_empty() { return Err("请在设置页填写默认 provider 的 API Key；本地无鉴权服务可填任意占位值".into()); }
+    Ok(provider)
+}
+
+// 只读取应用配置目录，不读取项目 env，也不向前端返回已保存的 Key。
+pub fn read(app: &tauri::AppHandle) -> Result<ModelConfig, String> {
+    let state = app.state::<ConfigurationState>();
+    let _guard = state.0.lock().map_err(|_| "配置锁异常")?;
+    let (models, settings) = load(app)?;
+    let provider = selected(&models, &settings)?;
+    let mut secrets: Vec<String> = models.providers.values().map(|item| item.api_key.clone()).filter(|key| !key.is_empty()).collect();
+    // JSON 日志中的引号和反斜杠会转义，原文与转义文本都需遮蔽。
+    let escaped: Vec<String> = secrets.iter().filter_map(|key| serde_json::to_string(key).ok())
+        .map(|key| key[1..key.len() - 1].to_string()).collect();
+    secrets.extend(escaped);
+    secrets.sort_by_key(|key| std::cmp::Reverse(key.len()));
+    secrets.dedup();
+    Ok(ModelConfig { provider: settings.default_provider.clone(), model: settings.default_model.clone(), key: provider.api_key.clone(), secrets, definition: provider.clone(), settings })
+}
+
+impl ModelConfig {
+    pub fn prepare(&self) -> Result<tempfile::TempDir, String> {
+        // 每个进程独占配置快照；pi 的设置写入不会触及用户配置或其他进程。
+        let root = tempfile::Builder::new().prefix("gen-mod-pi-").tempdir().map_err(|_| "无法创建运行时配置目录")?;
+        let mut provider = self.definition.clone();
+        restore_thinking_map(&mut provider);
+        provider.api_key = "$GEN_MOD_PROVIDER_API_KEY".into();
+        provider.models.retain(|model| model.id == self.model);
+        let models = ModelsFile { providers: BTreeMap::from([(self.provider.clone(), provider)]) };
+        crate::storage::mods::write_json(&root.path().join("models.json"), &models).map_err(|_| "无法写入运行时模型配置")?;
+        crate::storage::mods::write_json(&root.path().join("settings.json"), &self.settings).map_err(|_| "无法写入运行时默认模型")?;
+        Ok(root)
+    }
+}
+
+fn status(app: &tauri::AppHandle, models: ModelsFile, settings: SettingsFile) -> Result<ConfigurationStatus, String> {
+    let key_configured = selected(&models, &settings).is_ok();
+    let root = crate::pi::runtime::resources(app)?;
     Ok(ConfigurationStatus {
-        base_url: config.base_url, model: config.model,
-        key_configured: !config.key.trim().is_empty(), env_path: config.env_path.to_string_lossy().into_owned(),
+        providers: models.providers.into_iter().map(|(id, provider)| ProviderConfiguration {
+            id, name: provider.name, base_url: provider.base_url, api: provider.api,
+            key_configured: !provider.api_key.is_empty(), api_key: None, models: provider.models,
+        }).collect(),
+        model: settings.default_model.clone(), default_provider: settings.default_provider,
+        default_model: settings.default_model, key_configured,
+        configuration_directory: directory(app)?.to_string_lossy().into_owned(),
         runtime_version: "1.1.0".into(), node_version: "22.19.0".into(),
         runtime_prepared: root.join("node-v22.19.0-win-x64/node.exe").is_file() && root.join("pi-portable-v1.1.0/.deployment-complete").is_file(),
     })
 }
 
 #[tauri::command]
+pub fn get_configuration(app: tauri::AppHandle) -> Result<ConfigurationStatus, String> {
+    let state = app.state::<ConfigurationState>();
+    let _guard = state.0.lock().map_err(|_| "配置锁异常")?;
+    let (models, settings) = load(&app)?;
+    status(&app, models, settings)
+}
+
+#[tauri::command]
+pub fn save_configuration(app: tauri::AppHandle, configuration: SaveConfiguration) -> Result<ConfigurationStatus, String> {
+    let state = app.state::<ConfigurationState>();
+    let _guard = state.0.lock().map_err(|_| "配置锁异常")?;
+    let (previous, previous_settings) = load(&app)?;
+    let mut models = ModelsFile::default();
+    for item in configuration.providers {
+        let id = item.id.trim().to_string();
+        if id.is_empty() || !id.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.')) {
+            return Err("Provider ID 只能包含字母、数字、点、横线和下划线".into());
+        }
+        if models.providers.contains_key(&id) { return Err("Provider ID 不能重复".into()); }
+        let name = item.name.trim().to_string();
+        if name.is_empty() { return Err("Provider 名称不能为空".into()); }
+        let base_url = item.base_url.trim().trim_end_matches('/').to_string();
+        let url = tauri::Url::parse(&base_url).map_err(|_| "Base URL 不是有效 URL")?;
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
+            return Err("Base URL 应为不含凭据、查询或片段的 HTTP(S) 地址".into());
+        }
+        if !matches!(item.api.as_str(), "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai") { return Err("不支持的 API 协议".into()); }
+        // 留空保留同 ID 的 Key；表单只接受实际密钥，不执行命令或环境变量表达式。
+        let entered_key = item.api_key.unwrap_or_default().trim().to_string();
+        let key = if entered_key.is_empty() { previous.providers.get(&id).map(|p| p.api_key.clone()).unwrap_or_default() } else { entered_key };
+        if key.chars().any(|c| c.is_whitespace() || c.is_control()) || key.starts_with('!') || key.contains('$') {
+            return Err("API Key 应为实际密钥，不能包含空白、控制字符、命令或环境变量表达式".into());
+        }
+        let mut ids = HashSet::new();
+        let mut definitions = item.models;
+        for model in &mut definitions {
+            model.id = model.id.trim().to_string();
+            model.name = model.name.trim().to_string();
+            if model.id.is_empty() || model.id.chars().any(|c| c.is_whitespace() || c.is_control()) || model.name.is_empty() { return Err("模型 ID 不能为空或包含空白，显示名称不能为空".into()); }
+            if !ids.insert(model.id.clone()) { return Err("同一 provider 下的模型 ID 不能重复".into()); }
+            if model.context_window == 0 || model.max_tokens == 0 || model.max_tokens > model.context_window { return Err("模型上下文和最大输出必须为正整数，最大输出不能超过上下文长度".into()); }
+            if model.input != ["text"] && model.input != ["text", "image"] { return Err("模型输入能力配置无效".into()); }
+            if model.thinking_level_map.iter().any(|(level, value)| !matches!(level.as_str(), "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") || value.as_ref().is_some_and(|value| value.trim().is_empty() || value.chars().any(|c| c.is_whitespace() || c.is_control()))) {
+                return Err("模型思考强度映射无效".into());
+            }
+        }
+        models.providers.insert(id, Provider { name, base_url, api: item.api, api_key: key, models: definitions });
+    }
+    let settings = SettingsFile {
+        default_provider: configuration.default_provider, default_model: configuration.default_model,
+        other: previous_settings.other.clone(),
+    };
+    if !settings.default_provider.is_empty() || !settings.default_model.is_empty() {
+        let provider = models.providers.get(&settings.default_provider).ok_or("默认 provider 不存在")?;
+        if !provider.models.iter().any(|model| model.id == settings.default_model) { return Err("默认模型不存在".into()); }
+    }
+    let result = status(&app, ModelsFile { providers: models.providers.clone() }, SettingsFile {
+        default_provider: settings.default_provider.clone(), default_model: settings.default_model.clone(), other: settings.other.clone(),
+    })?;
+    let root = directory(&app)?;
+    fs::create_dir_all(&root).map_err(|_| "无法创建模型配置目录")?;
+    crate::storage::mods::write_json(&root.join("models.json"), &models).map_err(|_| "无法保存模型配置")?;
+    if crate::storage::mods::write_json(&root.join("settings.json"), &settings).is_err() {
+        crate::storage::mods::write_json(&root.join("models.json"), &previous).map_err(|_| "默认模型保存失败，恢复 provider 配置也失败，请重新打开设置页")?;
+        return Err("默认模型保存失败，provider 配置已恢复".into());
+    }
+    Ok(result)
+}
+
+#[tauri::command]
 pub fn open_configuration_directory(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let config = read(&app)?;
-    let directory = config.env_path.parent().ok_or("env 文件目录无效")?;
-    fs::create_dir_all(directory).map_err(|e| e.to_string())?;
-    app.opener().open_path(directory.to_string_lossy().into_owned(), None::<&str>).map_err(|e| e.to_string())
+    let root = directory(&app)?;
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    app.opener().open_path(root.to_string_lossy().into_owned(), None::<&str>).map_err(|e| e.to_string())
 }

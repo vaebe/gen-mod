@@ -13,6 +13,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(storage::mods::StorageState::default())
+        .manage(config::ConfigurationState::default())
         .manage(pi::bridge::PiState::default())
         .manage(pi::workspace::Workspaces::default())
         .manage(install::installer::InstallState::default())
@@ -26,7 +27,7 @@ pub fn run() {
             pi::bridge::create_mod_session, pi::bridge::connect_pi, pi::bridge::send_pi_command,
             pi::bridge::disconnect_pi, pi::bridge::start_mod_task,
             pi::bridge::steer_mod_task, storage::repository::list_steering_inputs,
-            config::get_configuration, config::open_configuration_directory,
+            config::get_configuration, config::save_configuration, config::open_configuration_directory,
             changes::list_task_operations, changes::list_task_changes, changes::get_task_file_diff,
             files::reveal_source_file, files::open_message_link,
             files::list_source_directory, files::read_source_file,

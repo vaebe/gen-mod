@@ -11,7 +11,6 @@ Windows x64，Node >=22.19、pnpm 11.17、Rust 与 Tauri 的 Windows 编译环�
 ```powershell
 pnpm install --ignore-scripts
 pnpm prepare:runtime
-if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 pnpm tauri dev
 ```
 
@@ -19,15 +18,15 @@ pnpm tauri dev
 
 ## 模型配置
 
-开发读取项目根 `.env`；发布读取 Tauri `appConfigDir/.env`，设置页可打开该目录。配置变更后，空闲时重新连接或开始新任务读取新值。
+在设置页点击“添加 provider”，通过弹窗填写名称、唯一 ID、Base URL、API 协议和 API Key；在同一弹窗添加模型 ID、显示名称、上下文长度、最大输出以及图片输入和推理能力。模型参数按服务商规格填写。支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Generative AI。
 
-```dotenv
-STEPFUN_BASE_URL=https://api.stepfun.com/step_plan/v1
-STEPFUN_MODEL=step-5-preview
-STEPFUN_API_KEY=
-```
+添加到列表后，选择默认模型并点击“保存配置”。编辑和移除同样在保存后生效；保存失败保留当前输入。修改不打断正在执行的任务，下次启动任务读取新配置。
 
-API 固定为 `openai-responses`。Key 由 Rust 读取并传给 pi 子进程，前端仅展示配置状态。无 Key 仍能创建项目、保存草稿和查看管理页，最终真实模型验收时由用户补充。
+开发和发布均使用 Tauri `appConfigDir/pi/models.json` 与 `settings.json`，不读取项目或应用目录的 `.env`。配置由 Rust 保存，Key 以明文保存在本机，读取接口不返回已保存的 Key；编辑时留空保留原 Key。命令子进程移除应用传入的 Key，日志继续脱敏。本地无鉴权服务可填写任意占位 Key。
+
+每个 pi 进程使用独立临时配置快照，仅包含当前 provider 和模型，Key 通过环境变量引用；进程结束后清理快照。pi 不写回设置页的配置文件。命令后代移除 Key、脱敏集合和配置目录环境变量，日志遮蔽启动时全部已配置的 Key。Step Plan 的 `step-5-preview` 保留 low / medium / high 限制；模型的 `thinkingLevelMap` 在读取、编辑和保存时保留。
+
+未配置默认模型或 Key 时仍能创建项目、保存草稿和管理已有版本。首版手动填写模型 ID，不包含远程模型列表获取、OAuth 登录或联网连接测试。
 
 ## Skills
 

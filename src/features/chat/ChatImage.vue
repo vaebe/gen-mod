@@ -3,15 +3,15 @@ import { computed } from "vue";
 import type { ImageInput } from "@/contracts/session";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
-const props = defineProps<{ image: ImageInput; alt: string }>();
+const props = defineProps<{ image: ImageInput; alt: string; compact?: boolean }>();
 const source = computed(() => `data:${props.image.mimeType};base64,${props.image.data}`);
 </script>
 
 <template>
   <Dialog>
     <DialogTrigger as-child>
-      <button type="button" :aria-label="`放大查看${alt}`" title="点击放大" class="cursor-zoom-in rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-        <img :src="source" :alt="alt" class="size-20 rounded-xl border bg-muted object-cover" loading="lazy" />
+      <button type="button" :aria-label="`放大查看${alt}`" title="点击放大" class="shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" :class="compact ? 'rounded' : 'rounded-xl'">
+        <img :src="source" :alt="alt" class="border bg-muted object-cover" :class="compact ? 'size-10 rounded' : 'size-20 rounded-xl'" loading="lazy" />
       </button>
     </DialogTrigger>
     <DialogContent class="w-[95vw] max-w-[95vw] sm:max-w-[95vw]">

@@ -5,6 +5,7 @@ import { ArrowUp, Square, Plus, Paperclip, Shrink, X, FileText, ChevronDown, Che
 import { computed, shallowRef, useTemplateRef, watch } from "vue";
 import { PopoverRoot, PopoverAnchor, PopoverTrigger, PopoverPortal, PopoverContent, DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuPortal, DropdownMenuContent, DropdownMenuItem } from "reka-ui";
 import ContextUsageIndicator from "./ContextUsageIndicator.vue";
+import ChatImage from "./ChatImage.vue";
 import type { ContextUsage, PromptAttachment, ThinkingLevel } from "@/contracts/session";
 const requirement = defineModel<string>({ required: true });
 const props = defineProps<{ attachments: PromptAttachment[]; readingAttachments: boolean; working: boolean; canSteer: boolean; stopping: boolean; busy: boolean; configured: boolean; model: string; error: string; thinkingLevel: ThinkingLevel; thinkingLevels: ThinkingLevel[]; contextUsage?: ContextUsage; compacting: boolean; canCompact: boolean }>();
@@ -67,9 +68,9 @@ const labels: Record<ThinkingLevel, string> = { off: "关闭", minimal: "最低"
     <div class="mx-auto max-w-3xl rounded-2xl border bg-card p-3 shadow-xs">
       <input ref="picker" type="file" multiple class="hidden" @change="chooseFiles" />
       <div v-if="attachments.length" class="mb-3 flex flex-wrap gap-2">
-        <div v-for="file in attachments" :key="file.id" class="flex max-w-56 items-center gap-2 rounded-lg border bg-muted/30 p-1.5 text-xs">
-          <img v-if="file.type === 'image'" :src="`data:${file.mimeType};base64,${file.data}`" :alt="file.name" class="size-10 rounded object-cover" /><FileText v-else class="size-5 shrink-0 text-muted-foreground" />
-          <span class="truncate" :title="file.name">{{ file.name }}</span><Button variant="ghost" size="icon" class="size-6 shrink-0" :aria-label="`移除 ${file.name}`" @click="$emit('removeAttachment', file.id)"><X class="size-3" /></Button>
+        <div v-for="file in attachments" :key="file.id" class="relative flex max-w-56 items-center text-xs" :class="file.type === 'image' ? 'shrink-0' : 'gap-2 rounded-lg border bg-muted/30 p-1.5'">
+          <ChatImage v-if="file.type === 'image'" :image="file" :alt="file.name" compact /><FileText v-else class="size-5 shrink-0 text-muted-foreground" />
+          <span v-if="file.type !== 'image'" class="truncate" :title="file.name">{{ file.name }}</span><Button variant="ghost" size="icon" class="shrink-0" :class="file.type === 'image' ? 'absolute -top-1.5 -right-1.5 z-10 size-5 rounded-full border bg-background shadow-xs hover:bg-muted' : 'size-6'" :aria-label="`移除 ${file.name}`" @click="$emit('removeAttachment', file.id)"><X class="size-3" /></Button>
         </div>
       </div>
       <Textarea v-model="requirement" rows="2" class="min-h-[44px] max-h-50 resize-none border-0 p-0 text-sm leading-6 shadow-none focus-visible:ring-0" aria-label="MOD 需求" placeholder="描述你希望实现的 MOD…" @blur="$emit('save')" @keydown="handleKey" @paste="pasteFiles" />

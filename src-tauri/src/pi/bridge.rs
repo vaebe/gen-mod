@@ -13,6 +13,7 @@ struct Process {
     child: Child,
     stdin: ChildStdin,
     _job: Option<ProcessJob>,
+    _configuration: tempfile::TempDir,
     channel: Channel<Envelope>,
     mod_id: String,
     session_id: String,
@@ -150,12 +151,11 @@ fn continue_worker_cleanup(process: &mut Process, request: &Value) {
     }
 }
 
-fn redact(value: &mut Value, key: &str) {
-    if key.is_empty() { return; }
+fn redact(value: &mut Value, keys: &[String]) {
     match value {
-        Value::String(text) => { *text = text.replace(key, "[redacted]"); }
-        Value::Array(items) => { for item in items { redact(item, key); } }
-        Value::Object(fields) => { for item in fields.values_mut() { redact(item, key); } }
+        Value::String(text) => { for key in keys { *text = text.replace(key, "[redacted]"); } }
+        Value::Array(items) => { for item in items { redact(item, keys); } }
+        Value::Object(fields) => { for item in fields.values_mut() { redact(item, keys); } }
         _ => {}
     }
 }
@@ -427,8 +427,8 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     fs::create_dir_all(&sessions).map_err(|e| e.to_string())?;
     paths::reject_redirect(&sessions)?;
     let config = crate::config::read(app)?;
-    let config_dir = crate::config::prepare(app, &config)?;
-    let mut command = runtime::command(app, &source, &sessions, &config_dir)?;
+    let configuration = config.prepare()?;
+    let mut command = runtime::command(app, &source, &sessions, configuration.path())?;
     let project = mods::read_project(app, mod_id)?;
     // 已记录的历史文件优先于按 ID 发现，避免发现失败时静默新建同名会话。
     let history = project.sessions.iter().find(|s| s.session_id == session_id).ok_or("会话不属于当前项目")?;
@@ -449,8 +449,9 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     for view in crate::skills::registry::resolve(app, &project.game_skill_name)? {
         command.arg("--skill").arg(std::path::Path::new(&view.definition.path).join("SKILL.md"));
     }
-    command.args(["--provider", "stepfun-plan", "--model", &config.model])
-        .env("STEPFUN_API_KEY", &config.key).env("STEPFUN_BASE_URL", &config.base_url).env("STEPFUN_MODEL", &config.model);
+    command.args(["--provider", &config.provider, "--model", &config.model])
+        .env("GEN_MOD_PROVIDER_API_KEY", &config.key)
+        .env("GEN_MOD_REDACTION_KEYS", serde_json::to_string(&config.secrets).map_err(|_| "无法准备凭据脱敏")?);
     if let Some(value) = task.as_mut() {
         value.context.generation = generation;
         command.env("GEN_MOD_TASK_CONTEXT", serde_json::to_string(&value.context).map_err(|e| e.to_string())?);
@@ -467,7 +468,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     let stdin = child.stdin.take().ok_or("pi stdin 未建立")?;
     let stdout = child.stdout.take().ok_or("pi stdout 未建立")?;
     let stderr = child.stderr.take().ok_or("pi stderr 未建立")?;
-    inner.process = Some(Process { child, stdin, _job: Some(job), channel, mod_id: mod_id.into(), session_id: session_id.into(), task, active: false, compacting: false, prompt_id: None, tool_inputs: std::collections::BTreeMap::new(), app: app.clone(), pending_title: None, waiting_leases: vec![], command_baselines: Default::default(), steering: vec![], steering_queue: vec![], consumed_inputs: Default::default(), confirming_input: None, stopping: false });
+    inner.process = Some(Process { child, stdin, _job: Some(job), _configuration: configuration, channel, mod_id: mod_id.into(), session_id: session_id.into(), task, active: false, compacting: false, prompt_id: None, tool_inputs: std::collections::BTreeMap::new(), app: app.clone(), pending_title: None, waiting_leases: vec![], command_baselines: Default::default(), steering: vec![], steering_queue: vec![], consumed_inputs: Default::default(), confirming_input: None, stopping: false });
     if let Some(process) = &inner.process {
         emit(process, generation, "diagnostic", json!({ "type": "runtime_started", "message": format!("启动 pi · 会话 {session_id} · 工作目录 {}", source.display()) }));
         if let Some(task) = &process.task { emit(process, generation, "task", json!({ "type": "task_started", "context": task.context })); }
@@ -475,7 +476,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
 
     let app_stdout = app.clone();
     let shared_stdout = state.clone();
-    let stdout_secret = config.key.clone();
+    let stdout_secrets = config.secrets.clone();
     std::thread::spawn(move || {
         // read_until 只按 LF 分帧，U+2028/U+2029 是 JSON 字符串内容。
         let mut reader = BufReader::new(stdout);
@@ -493,7 +494,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
             }
             match serde_json::from_slice::<Value>(&bytes) {
                 Ok(mut record) if record.get("type").and_then(Value::as_str).is_some() => {
-                    redact(&mut record, &stdout_secret);
+                    redact(&mut record, &stdout_secrets);
                     if record["type"] == "extension_ui_request" && record["title"] == "gen-mod:workspace" {
                         let request = serde_json::from_str::<Value>(record["placeholder"].as_str().unwrap_or(""));
                         if let Ok(request) = request {
@@ -603,11 +604,11 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
         }
     });
     let shared_stderr = state.clone();
-    // 避免凭据进入诊断：只转发已移除当前 Key 的 stderr 行，不输出环境。
-    let secret = config.key.clone();
+    // 非当前 provider 的 Key 同样不能进入诊断或任务日志。
+    let secrets = config.secrets.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            let message = if secret.is_empty() { line } else { line.replace(&secret, "[redacted]") };
+            let message = secrets.iter().fold(line, |text, key| text.replace(key, "[redacted]"));
             let inner = match shared_stderr.0.lock() { Ok(value) => value, Err(_) => break };
             if inner.generation != generation { break; }
             if let Some(process) = &inner.process {
@@ -812,7 +813,7 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
     crate::storage::repository::save_preferences(&app,&mod_id,&session_id,None,Some(&thinking_level))?;
     if requirement.trim().is_empty() { return Err("需求不能为空".into()) }
     if !matches!(thinking_level.as_str(), "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") { return Err("无效的思考强度".into()); }
-    if crate::config::read(&app)?.key.trim().is_empty() { return Err("需求已保存；请在 env 配置 STEPFUN_API_KEY 后发送".into()) }
+    crate::config::read(&app).map_err(|error| format!("需求已保存；{error}"))?;
     let id = session(&app, &mod_id, Some(&session_id))?;
     let project = mods::read_project(&app, &mod_id)?;
     let directory = paths::project_dir(&app, &mod_id)?;

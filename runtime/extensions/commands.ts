@@ -11,12 +11,15 @@ export function context(): TaskContext {
   if (!raw) { throw new Error("此连接没有原生任务上下文，不能执行命令或交付"); }
   return JSON.parse(raw) as TaskContext;
 }
+// 仅 pi 主进程持有脱敏集合，命令后代不能继承这些密钥。
+const secrets = [...new Set<string>(JSON.parse(process.env.GEN_MOD_REDACTION_KEYS ?? "[]") as string[])]
+  .filter(Boolean).sort((left, right) => right.length - left.length);
+const redact = (value: string): string => secrets.reduce((text, key) => text.replaceAll(key, "[redacted]"), value);
 /** stderr 独立于工具回执，协调失败时原生仍可保存命令已执行的证据。 */
 export function runtimeDiagnostic(event: string, fields: Record<string, unknown>): void {
   const task = context();
   const raw = JSON.stringify({ type: "command_diagnostic", event, timestamp: new Date().toISOString(), taskId: task.taskId, ...fields });
-  const secret = process.env.STEPFUN_API_KEY;
-  process.stderr.write(`GEN_MOD_DIAGNOSTIC ${secret ? raw.replaceAll(secret, "[redacted]") : raw}\n`);
+  process.stderr.write(`GEN_MOD_DIAGNOSTIC ${redact(raw)}\n`);
 }
 export async function contained(root: string, path: string): Promise<string> {
   const base = await realpath(root);
@@ -64,14 +67,14 @@ export async function runCommand(toolCallId: string, program: string, args: stri
   const log = await open(logPath, "wx");
   const startedAt = new Date().toISOString();
   const started = performance.now();
-  const secret = process.env.STEPFUN_API_KEY ?? "";
   const environment = { ...process.env };
-  delete environment.STEPFUN_API_KEY;
+  delete environment.GEN_MOD_PROVIDER_API_KEY;
+  delete environment.GEN_MOD_REDACTION_KEYS;
+  delete environment.PI_CODING_AGENT_DIR;
   const available = await commandEnvironment();
   // GUI 进程的旧 PATH 可能不含已安装 SDK；命令子进程补充实际找到的目录。
   const pathKey = Object.keys(environment).find(key => key.toLowerCase() === "path") ?? "PATH";
   environment[pathKey] = [...new Set([available.shell, available.dotnet].filter((path): path is string => !!path).map(dirname)), environment[pathKey] ?? ""].join(delimiter);
-  const redact = (value: string) => secret ? value.replaceAll(secret, "[redacted]") : value;
   const metadata = { commandId, toolCallId, leaseId: lease.leaseId, program, args, cwd: directory, logPath, startedAt };
   await log.write(`[command] ${redact(JSON.stringify(metadata))}\n`);
   runtimeDiagnostic("command_start", metadata);
@@ -86,12 +89,17 @@ export async function runCommand(toolCallId: string, program: string, args: stri
     stream.setEncoding("utf8");
     stream.on("data", (chunk: string) => {
       const combined = tail + chunk;
-      const keep = secret ? Math.max(0, secret.length - 1) : 0;
+      const keep = Math.max(0, ...secrets.map(key => key.length - 1));
       let boundary = Math.max(0, combined.length - keep);
-      if (secret) {
-        const crossing = combined.lastIndexOf(secret, boundary);
-        if (crossing >= 0 && crossing + secret.length > boundary) { boundary = crossing; }
-      }
+      // 不切开任一 Key；重叠密钥导致边界前移时重新检查。
+      let previousBoundary: number;
+      do {
+        previousBoundary = boundary;
+        for (const key of secrets) {
+          const crossing = combined.lastIndexOf(key, boundary);
+          if (crossing >= 0 && crossing + key.length > boundary) { boundary = crossing; }
+        }
+      } while (boundary !== previousBoundary);
       const safe = redact(combined.slice(0, boundary));
       remember(safe);
       tail = combined.slice(boundary);
