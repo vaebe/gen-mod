@@ -1,5 +1,10 @@
+minimumReleaseAgeExcludePrune: true
+trustPolicy: no-downgrade
+shellEmulator: true
+
 packages:
   - runtime
+
 allowBuilds:
   '@google/genai': false
   esbuild: false

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import type { SkillView } from "@/contracts/skill";
-import { SwitchRoot, SwitchThumb } from "reka-ui";
-defineProps<{ skill: SkillView; disabled: boolean }>();
-defineEmits<{ toggle: [enabled: boolean]; select: [] }>();
+import type { SkillView } from '@/contracts/skill'
+import { SwitchRoot, SwitchThumb } from 'reka-ui'
+
+defineProps<{ skill: SkillView, disabled: boolean }>()
+defineEmits<{ toggle: [enabled: boolean], select: [] }>()
 </script>
+
 <template>
   <li class="flex items-center gap-4 py-1">
     <button type="button" class="min-w-0 flex-1 rounded-md px-3 py-4 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" :aria-label="`查看 ${skill.name} 的 SKILL.md`" @click="$emit('select')">

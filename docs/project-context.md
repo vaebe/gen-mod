@@ -138,21 +138,21 @@
 
 ## 关键代码入口
 
-| 内容 | 文件 |
-| --- | --- |
-| 项目分组、会话管理 | `src/features/workbench/ProjectSidebar.vue` |
-| 输入框、附件、功能菜单 | `src/features/chat/ChatComposer.vue`、`attachments.ts`、`ChatPage.vue` |
-| 时间、活动、过程渲染 | `RoundActivity.vue`、`MessageParts.vue`、`conversationRounds.ts` |
-| 上下文用量 | `ContextUsageIndicator.vue`、`src/stores/session.ts` |
-| RPC 请求匹配与历史归并 | `src/services/pi/client.ts`、`reducer.ts` |
-| 每会话运行状态、提交与引导 | `src/services/pi/sessionRuntime.ts`、`src/stores/session.ts`、`src/features/chat/useDraft.ts` |
-| 图片放大预览 | `src/features/chat/ChatImage.vue` |
-| 工作台布局与源码浏览 | `src/features/workbench/WorkbenchLayout.vue`、`ContextPanel.vue`、`SourceBrowser.vue`、`useSourceBrowser.ts`、`SourceFilePreview.vue`、`src-tauri/src/files.rs` |
-| 版本列表与详情 | `src/features/mods/ModManagerPage.vue`、`VersionList.vue`、`ArtifactPanel.vue` |
-| 原生启动、任务与交付回执 | `src-tauri/src/pi/bridge.rs`、`runtime.rs` |
-| 历史与运行日志读取 | `src-tauri/src/pi/sessions.rs`、`logs.rs` |
-| 项目存储与模型配置 | `src-tauri/src/storage/`、`src-tauri/src/config.rs` |
-| 命令、持续工作区说明、交付工具 | `runtime/extensions/commands.ts`、`mod-tools.ts`、`delivery.ts` |
+| 内容                           | 文件                                                                                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 项目分组、会话管理             | `src/features/workbench/ProjectSidebar.vue`                                                                                                                     |
+| 输入框、附件、功能菜单         | `src/features/chat/ChatComposer.vue`、`attachments.ts`、`ChatPage.vue`                                                                                          |
+| 时间、活动、过程渲染           | `RoundActivity.vue`、`MessageParts.vue`、`conversationRounds.ts`                                                                                                |
+| 上下文用量                     | `ContextUsageIndicator.vue`、`src/stores/session.ts`                                                                                                            |
+| RPC 请求匹配与历史归并         | `src/services/pi/client.ts`、`reducer.ts`                                                                                                                       |
+| 每会话运行状态、提交与引导     | `src/services/pi/sessionRuntime.ts`、`src/stores/session.ts`、`src/features/chat/useDraft.ts`                                                                   |
+| 图片放大预览                   | `src/features/chat/ChatImage.vue`                                                                                                                               |
+| 工作台布局与源码浏览           | `src/features/workbench/WorkbenchLayout.vue`、`ContextPanel.vue`、`SourceBrowser.vue`、`useSourceBrowser.ts`、`SourceFilePreview.vue`、`src-tauri/src/files.rs` |
+| 版本列表与详情                 | `src/features/mods/ModManagerPage.vue`、`VersionList.vue`、`ArtifactPanel.vue`                                                                                  |
+| 原生启动、任务与交付回执       | `src-tauri/src/pi/bridge.rs`、`runtime.rs`                                                                                                                      |
+| 历史与运行日志读取             | `src-tauri/src/pi/sessions.rs`、`logs.rs`                                                                                                                       |
+| 项目存储与模型配置             | `src-tauri/src/storage/`、`src-tauri/src/config.rs`                                                                                                             |
+| 命令、持续工作区说明、交付工具 | `runtime/extensions/commands.ts`、`mod-tools.ts`、`delivery.ts`                                                                                                 |
 
 表中省略目录的 Vue 文件均在 `src/features/chat/`。
 
@@ -169,7 +169,6 @@
 - 此前附件 / 菜单 / 命令环境改动的上述类型与编译检查通过；这不证明实际图片请求、菜单焦点、真实窗口或游戏行为。
 - 当前没有由助手执行真实模型与游戏内验收。本次 UI 改动的检查结果记录在阶段实施记录，不将计划中的检查写成已通过。
 
-
 ## 多会话、共享源码与 SQLite（2026-10-09 实施）
 
 2026-10-10 审核修复：工具结束、任务收尾和进程停止的差异刷新异步等待源码租约，取得后核对会话代次；不得持读租约反向等待会话锁。发送成功按原会话清理附件及未编辑的草稿，SQLite 条件更新保护较新的输入；任务启动只保存思考强度，不把含附件的 prompt 覆盖回草稿。进程退出收敛未完成工具终态，缓存会话同步最新只读状态，按需连接先应用持久思考强度再查询状态。限定 Vue 类型检查与两个 Rust 文件语法解析通过；未运行测试、应用或 Rust 编译。
@@ -185,7 +184,6 @@
 - 元数据更新使用短事务重读及 revision，避免后台事件覆盖同时新增的版本/安装信息。文件与数据库跨边界操作先记恢复记录；启动修复 tombstone/未完成安装状态并报告孤立文件，不删除历史备份、安装记录或孤立交付。
 - 重启只把旧活动任务标为 interrupted、未确认引导标为 unknown；保持会话 ID 与 JSONL 路径，不恢复旧进程、不重放需求。迁移仅在用户启动新应用时发生，本轮没有运行数据库迁移或访问现有应用数据。
 - 最新静态检查及用户验收见实施记录和实施计划末尾。尚未运行多进程、SQLite 迁移、真实模型/图片、UI 或游戏验收；类型/编译通过不能替代这些 Gate。
-
 
 ### 2026-10-10 启动修复记录
 

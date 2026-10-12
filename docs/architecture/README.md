@@ -56,21 +56,21 @@ flowchart TB
 
 ## 2. 模块职责与代码位置
 
-| 模块 | 职责 | 主要代码 |
-| --- | --- | --- |
-| 页面与工作台 | 项目选择、聊天、源码只读浏览、版本安装、Skills 与模型设置 | `src/features/`、`src/router/index.ts` |
-| 项目与会话状态 | 按项目与会话保存运行状态；切换页面不结束后台任务 | `src/stores/projects.ts`、`src/stores/session.ts` |
-| 会话客户端 | 发起任务和引导输入，匹配 RPC 请求，按身份与 generation 过滤事件 | `src/services/pi/client.ts` |
-| 消息归并 | 将流式事件转成聊天内容、活动状态和产物刷新信号 | `src/services/pi/sessionRuntime.ts`、`reducer.ts` |
-| IPC 入口 | 注册前端可调用的原生命令，初始化数据库，退出时清理运行时 | `src-tauri/src/lib.rs` |
-| 运行时管理 | 维护会话槽、启动 pi、传递配置与任务上下文、接收事件、管理进程树 | `src-tauri/src/pi/bridge.rs`、`manager.rs`、`runtime.rs`、`job.rs` |
-| 工作区协调 | 读写租约、排队、读取基线和源码 revision 校验 | `src-tauri/src/pi/workspace.rs`、`runtime/extensions/workspace.ts` |
-| 工具扩展 | 文件操作、程序与参数数组执行、命令回执、准备交付 | `runtime/extensions/mod-tools.ts`、`commands.ts`、`delivery.ts` |
-| 能力注册表 | 导入与启停能力，解析依赖、内容哈希与必要构建脚本 | `src-tauri/src/skills/registry.rs`、`skills/registry.json` |
-| 版本登记 | 核对任务、命令、文件与 ZIP，登记和删除应用内版本 | `src-tauri/src/artifacts/registry.rs` |
-| 安装器 | 生成预览、确认后重新校验并复制，记录目标状态 | `src-tauri/src/install/installer.rs` |
-| 持久化 | SQLite 初始化、仓储、旧数据迁移、重启恢复与文件操作协调 | `src-tauri/src/storage/` |
-| 配置与文件访问 | 模型配置、源码浏览、差异、目录打开与 ZIP 导出 | `src-tauri/src/config.rs`、`files.rs`、`changes.rs` |
+| 模块           | 职责                                                            | 主要代码                                                           |
+| -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 页面与工作台   | 项目选择、聊天、源码只读浏览、版本安装、Skills 与模型设置       | `src/features/`、`src/router/index.ts`                             |
+| 项目与会话状态 | 按项目与会话保存运行状态；切换页面不结束后台任务                | `src/stores/projects.ts`、`src/stores/session.ts`                  |
+| 会话客户端     | 发起任务和引导输入，匹配 RPC 请求，按身份与 generation 过滤事件 | `src/services/pi/client.ts`                                        |
+| 消息归并       | 将流式事件转成聊天内容、活动状态和产物刷新信号                  | `src/services/pi/sessionRuntime.ts`、`reducer.ts`                  |
+| IPC 入口       | 注册前端可调用的原生命令，初始化数据库，退出时清理运行时        | `src-tauri/src/lib.rs`                                             |
+| 运行时管理     | 维护会话槽、启动 pi、传递配置与任务上下文、接收事件、管理进程树 | `src-tauri/src/pi/bridge.rs`、`manager.rs`、`runtime.rs`、`job.rs` |
+| 工作区协调     | 读写租约、排队、读取基线和源码 revision 校验                    | `src-tauri/src/pi/workspace.rs`、`runtime/extensions/workspace.ts` |
+| 工具扩展       | 文件操作、程序与参数数组执行、命令回执、准备交付                | `runtime/extensions/mod-tools.ts`、`commands.ts`、`delivery.ts`    |
+| 能力注册表     | 导入与启停能力，解析依赖、内容哈希与必要构建脚本                | `src-tauri/src/skills/registry.rs`、`skills/registry.json`         |
+| 版本登记       | 核对任务、命令、文件与 ZIP，登记和删除应用内版本                | `src-tauri/src/artifacts/registry.rs`                              |
+| 安装器         | 生成预览、确认后重新校验并复制，记录目标状态                    | `src-tauri/src/install/installer.rs`                               |
+| 持久化         | SQLite 初始化、仓储、旧数据迁移、重启恢复与文件操作协调         | `src-tauri/src/storage/`                                           |
+| 配置与文件访问 | 模型配置、源码浏览、差异、目录打开与 ZIP 导出                   | `src-tauri/src/config.rs`、`files.rs`、`changes.rs`                |
 
 界面采用 Vue 3、TypeScript、Vue Router、Pinia、shadcn-vue / Reka UI、Tailwind CSS 4；消息渲染使用 markstream-vue，代码高亮使用 Shiki。Vite 负责前端构建，Rust/Tauri 负责桌面应用与本机能力。
 

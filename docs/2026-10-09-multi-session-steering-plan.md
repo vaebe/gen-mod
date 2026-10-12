@@ -55,12 +55,12 @@
 
 ```ts
 interface RuntimeIdentity {
-  modId: string;
-  sessionId: string;
-  generation: number;
+  modId: string
+  sessionId: string
+  generation: number
 }
-type RunPhase = "idle" | "preparing" | "running" | "compacting" | "stopping"
-  | "finished" | "cancelled" | "interrupted" | "failed";
+type RunPhase = 'idle' | 'preparing' | 'running' | 'compacting' | 'stopping'
+  | 'finished' | 'cancelled' | 'interrupted' | 'failed'
 ```
 
 - `generation` 在单个会话内递增；旧槽移除后也不能重用旧 generation。身份、代次和 requestId 一并检查，防止迟到事件更新新进程。
@@ -88,13 +88,13 @@ type RunPhase = "idle" | "preparing" | "running" | "compacting" | "stopping"
 
 协调器在 Rust 中按 modId 管理，跨 pi 进程有效。不能用 extension 进程内的 Map 充当跨会话锁。
 
-| 操作 | 同项目规则 |
-| --- | --- |
-| 模型请求、公开过程文字、steering | 可并发，不持工作区锁 |
-| read/grep/find/ls、任务初始快照 | 共享读取租约；写操作期间等待，避免观察半写入状态 |
-| write/edit | 独占租约，拿锁后检查文件基线，完成写入后立即释放 |
-| run_command | 独占租约覆盖整个命令及其后代生命周期；任意命令可能改文件，首期不猜测其只读性 |
-| prepare_delivery | 独占租约覆盖复制、打包、原生校验与登记，保证取样和校验一致 |
+| 操作                             | 同项目规则                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------- |
+| 模型请求、公开过程文字、steering | 可并发，不持工作区锁                                                         |
+| read/grep/find/ls、任务初始快照  | 共享读取租约；写操作期间等待，避免观察半写入状态                             |
+| write/edit                       | 独占租约，拿锁后检查文件基线，完成写入后立即释放                             |
+| run_command                      | 独占租约覆盖整个命令及其后代生命周期；任意命令可能改文件，首期不猜测其只读性 |
+| prepare_delivery                 | 独占租约覆盖复制、打包、原生校验与登记，保证取样和校验一致                   |
 
 这意味着同项目模型可以同时运行，但长构建期间其他会话的文件工具可能等待；界面应如实显示等待原因，仍允许切换和引导。不同项目不共享工作区锁。
 
@@ -129,7 +129,7 @@ type RunPhase = "idle" | "preparing" | "running" | "compacting" | "stopping"
 3. 先保存 inputId、任务身份和 submitted 状态，再向该进程发送 RPC：
 
 ```json
-{"id":"<inputId>","type":"steer","message":"将范围改为 140m","images":[]}
+{ "id": "<inputId>", "type": "steer", "message": "将范围改为 140m", "images": [] }
 ```
 
 4. `queued` 表示已接收等待处理，`handled` 表示扩展消费；不能将二者写成“已经执行完毕”。根据 queue_update 与正式用户消息事件更新展示。
@@ -153,15 +153,15 @@ pi 不承诺正式用户消息携带应用 inputId。引导采用 one-at-a-time 
 
 数据库保存到应用 local data 根目录 `gen-mod.sqlite3`，Rust 提供受控访问，Vue 不执行 SQL，API Key 继续来自 env。
 
-| 数据 | 实施后权威来源 |
-| --- | --- |
-| 项目信息、版本条目、安装记录、部署位置 | SQLite projects.payload；先保留现有 DTO 形状，避免无关的全量表拆分 |
-| 会话标题、skill 快照、历史文件关联、只读状态、草稿、强度 | SQLite sessions |
-| 任务状态、时间、命令回执、登记版本关联 | SQLite tasks.payload 与索引字段 |
-| 运行摘要日志、引导状态、上下文快照、最后活动 | SQLite 对应表 |
-| 原始消息、工具结果、压缩历史、已发送附件 | pi JSONL；数据库只存应用关联，不能重复存完整聊天作为第二权威 |
-| 源码、任务工具全文/命令日志、staging、版本文件、ZIP、不可变清单 | 文件系统，现有目录继续使用 |
-| skills registry.json、模型配置、env | 原有文件，不属于此次迁移 |
+| 数据                                                            | 实施后权威来源                                                     |
+| --------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 项目信息、版本条目、安装记录、部署位置                          | SQLite projects.payload；先保留现有 DTO 形状，避免无关的全量表拆分 |
+| 会话标题、skill 快照、历史文件关联、只读状态、草稿、强度        | SQLite sessions                                                    |
+| 任务状态、时间、命令回执、登记版本关联                          | SQLite tasks.payload 与索引字段                                    |
+| 运行摘要日志、引导状态、上下文快照、最后活动                    | SQLite 对应表                                                      |
+| 原始消息、工具结果、压缩历史、已发送附件                        | pi JSONL；数据库只存应用关联，不能重复存完整聊天作为第二权威       |
+| 源码、任务工具全文/命令日志、staging、版本文件、ZIP、不可变清单 | 文件系统，现有目录继续使用                                         |
+| skills registry.json、模型配置、env                             | 原有文件，不属于此次迁移                                           |
 
 上下文快照包含 tokens（可空）、percent（可空）、contextWindow、estimated、sampledAt 和 generation；历史快照展示为上次统计，不能伪装成当前准确值。压缩后写入未知状态，保留此前快照但不继续作为当前占用显示。
 
@@ -350,7 +350,6 @@ payload 使用 serde DTO；projects.payload 不重复保存 sessions 和会话�
 - [SQLite 外键](https://www.sqlite.org/foreignkeys.html)：连接启用与约束。
 - [rusqlite 官方 API](https://docs.rs/rusqlite/latest/rusqlite/)：Rust 数据访问与事务 API；实施时再核对选定版本。
 
-
 ## 十、本轮进度与验收记录（2026-10-09）
 
 任务 1 → 7 已依次接入。基线与计划相比，原有单进程、全局 busy、项目级草稿及文件元数据入口均已替换；保留既有 skill 哈希保护、历史投影、安装直接覆盖与手动无限版本规则。实现没有源码分支或整轮任务队列。
@@ -358,6 +357,7 @@ payload 使用 serde DTO；projects.payload 不重复保存 sessions 和会话�
 Vue 限定类型检查（work/tsconfig.multi-session.json）、runtime TypeScript 检查（work/tsconfig.runtime.json）、cargo check --lib --locked --offline 均退出 0，Rust 无警告。已授权依赖下载完成；rusqlite 0.40.2 bundled SQLite 3.53.2，没有升级既有依赖。完整命令和资源准备、差异及 CodeGraph 最终输出记录于 docs/verification/implementation-progress.md。
 
 全部任务的运行 Gate 未执行。用户验收使用临时数据副本，覆盖：
+
 1. 旧历史/产物/安装记录/skill 校验迁移，重复启动幂等，坏项目隔离，异常安装及 tombstone 恢复。
 2. A/B 同时调用 AI，A 运行时切 B、新建 C、设置往返；事件、圆环、草稿、附件、任务、扩展请求和后台产物归属。
 3. 同项目读写 FIFO、旧 read 后覆盖拒绝、排队取消、长命令及后代进程停止；过期构建回执及交付 revision 拒绝。
@@ -365,7 +365,6 @@ Vue 限定类型检查（work/tsconfig.multi-session.json）、runtime TypeScrip
 5. 重启终态、历史统计提示、reduced motion、空闲版本操作与无关后台任务同时存在。
 
 没有运行测试、启动应用、调用模型、访问现有应用数据库/游戏部署目录、构建新版安装包、提交或推送。API Key 由用户补充，不影响上述已完成实施。
-
 
 ### 2026-10-10 后续修复
 

@@ -105,7 +105,6 @@
 - 原生删除先核对绝对目录边界，再暂时移走选定版本，元数据写入失败恢复目录；成功后清理应用内版本包。未实际删除用户版本或部署文件。
 - 限定 vue-tsc（work/tsconfig.mod-install.json）与 cargo check --lib --locked --offline 通过；未运行测试、启动应用或验收覆盖安装与删除行为。当前决策已同步到 project-context.md。
 
-
 ## 2026-10-09：多会话并发、运行中引导与 SQLite
 
 ### 范围及实施结果
@@ -133,7 +132,6 @@
 
 计划每个 Gate 均待真实运行。用户补 Key 后在临时数据副本中验收迁移幂等/错误隔离、并发会话及切换、共享工具冲突/取消/后代停止、连续文本图片引导、过期交付拒绝、后台产物与重启恢复；旧历史、版本、安装记录和 skill 校验分别核对。静态检查不证明这些行为已经实际运行成功。
 
-
 ### 最终收尾结果
 
 - node scripts/prepare-runtime.mjs：退出 0；Node 22.19.0 / pi 1.1.0，17,375 个运行时文件与 13 个 skills 文件已同步。之后只修改前端/Rust/文档，没有再改 runtime 扩展。
@@ -141,7 +139,6 @@
 - codegraph sync → codegraph status：依次退出 0，status 返回 [OK] Index is up to date。仅维护索引，不作为运行验收。
 - 最后 Vue 限定类型检查、Rust lib locked/offline 编译均再次退出 0，无 Rust 警告；runtime 检查通过后该范围未再改动。
 - 最后核对补齐：空会话已归档但旧任务保留时 initialDraft 不丢失；新建会话使用事务重读；会话删除历史文件前有恢复日志；意外 stdout 退出记录 interrupted，手动停止记录 cancelled，退出通知刷新任务、项目和界面状态。
-
 
 ## 2026-10-10：启动时缺少 sessions 字段
 

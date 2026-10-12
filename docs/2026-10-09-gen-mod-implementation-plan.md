@@ -37,31 +37,31 @@
 
 先建立这些边界，文件在对应任务中创建，不提前生成空文件。
 
-| 文件或目录 | 职责 | 首次任务 |
-| --- | --- | --- |
-| `src/contracts/mod.ts`、`skill.ts`、`session.ts` | 应用数据契约，不保存密钥 | 1 |
-| `src-tauri/src/storage/{models,paths,mods}.rs` | 原生 DTO、应用路径、MOD 元数据读写 | 1 |
-| `src/services/native.ts` | Tauri 调用及错误转换入口 | 1 |
-| `src/router/index.ts`、`src/styles.css`、`src/components/ui/` | 路由、主题、shadcn 基础组件 | 2 |
-| `src/features/workbench/` | 三栏布局、输入区、文件/日志上下文 | 2 |
-| `src/features/mods/` | 新建/打开 MOD、版本和安装管理 | 2、9 |
-| `src/services/pi/{types,client,reducer}.ts` | RPC 契约、请求匹配、事件归并 | 3 |
-| `src-tauri/src/pi/{runtime,bridge}.rs` | 运行时路径、JSONL 与进程生命周期 | 3 |
-| `src/contracts/task.ts`、`src-tauri/src/pi/tasks.rs` | 应用任务上下文、真实命令记录和交付关联 | 3、7 |
-| `src-tauri/src/config.rs`、`.env.example` | env 定位、读取与脱敏状态 | 4 |
-| `src/features/settings/` | env 状态与诊断，不编辑 Key | 4 |
-| `src/features/chat/`、`src/stores/session.ts` | 消息、工具、扩展 UI、会话状态 | 5 |
-| `src-tauri/src/pi/sessions.rs` | 会话路径关联、历史读取与恢复 | 5 |
-| `src-tauri/src/changes.rs`、`src/features/workbench/{ChangedFiles,FileDiff}.vue` | 源码任务基准、文件变更摘要与基础差异 | 5 |
-| `src-tauri/src/skills/{models,registry}.rs` | 清单、导入、依赖解析与快照 | 6 |
-| `src/features/skills/` | 分类、导入、启停与加载状态 | 6 |
-| `skills/common/mod-workflow/` | 通用开发流程与交付规范 | 7 |
-| `runtime/extensions/{mod-tools,commands,delivery}.ts` | 通用命令及交付结果，无游戏分支 | 7 |
-| `src-tauri/src/artifacts/{models,registry}.rs` | 交付检查、版本登记和导出 | 7 |
-| `skills/games/duckov/duckov-mod/` | Duckov 资料、模板与必要编译脚本 | 8 |
-| `src-tauri/src/install/{models,installer}.rs` | 安装预览、复制、备份与回退 | 9 |
-| `scripts/prepare-runtime.mjs`、`runtime/runtime-lock.json` | 精确运行时版本、资源清单与准备 | 3、10 |
-| `docs/verification/` | 各任务检查记录及 Windows 验收记录 | 对应任务 |
+| 文件或目录                                                                       | 职责                                   | 首次任务 |
+| -------------------------------------------------------------------------------- | -------------------------------------- | -------- |
+| `src/contracts/mod.ts`、`skill.ts`、`session.ts`                                 | 应用数据契约，不保存密钥               | 1        |
+| `src-tauri/src/storage/{models,paths,mods}.rs`                                   | 原生 DTO、应用路径、MOD 元数据读写     | 1        |
+| `src/services/native.ts`                                                         | Tauri 调用及错误转换入口               | 1        |
+| `src/router/index.ts`、`src/styles.css`、`src/components/ui/`                    | 路由、主题、shadcn 基础组件            | 2        |
+| `src/features/workbench/`                                                        | 三栏布局、输入区、文件/日志上下文      | 2        |
+| `src/features/mods/`                                                             | 新建/打开 MOD、版本和安装管理          | 2、9     |
+| `src/services/pi/{types,client,reducer}.ts`                                      | RPC 契约、请求匹配、事件归并           | 3        |
+| `src-tauri/src/pi/{runtime,bridge}.rs`                                           | 运行时路径、JSONL 与进程生命周期       | 3        |
+| `src/contracts/task.ts`、`src-tauri/src/pi/tasks.rs`                             | 应用任务上下文、真实命令记录和交付关联 | 3、7     |
+| `src-tauri/src/config.rs`、`.env.example`                                        | env 定位、读取与脱敏状态               | 4        |
+| `src/features/settings/`                                                         | env 状态与诊断，不编辑 Key             | 4        |
+| `src/features/chat/`、`src/stores/session.ts`                                    | 消息、工具、扩展 UI、会话状态          | 5        |
+| `src-tauri/src/pi/sessions.rs`                                                   | 会话路径关联、历史读取与恢复           | 5        |
+| `src-tauri/src/changes.rs`、`src/features/workbench/{ChangedFiles,FileDiff}.vue` | 源码任务基准、文件变更摘要与基础差异   | 5        |
+| `src-tauri/src/skills/{models,registry}.rs`                                      | 清单、导入、依赖解析与快照             | 6        |
+| `src/features/skills/`                                                           | 分类、导入、启停与加载状态             | 6        |
+| `skills/common/mod-workflow/`                                                    | 通用开发流程与交付规范                 | 7        |
+| `runtime/extensions/{mod-tools,commands,delivery}.ts`                            | 通用命令及交付结果，无游戏分支         | 7        |
+| `src-tauri/src/artifacts/{models,registry}.rs`                                   | 交付检查、版本登记和导出               | 7        |
+| `skills/games/duckov/duckov-mod/`                                                | Duckov 资料、模板与必要编译脚本        | 8        |
+| `src-tauri/src/install/{models,installer}.rs`                                    | 安装预览、复制、备份与回退             | 9        |
+| `scripts/prepare-runtime.mjs`、`runtime/runtime-lock.json`                       | 精确运行时版本、资源清单与准备         | 3、10    |
+| `docs/verification/`                                                             | 各任务检查记录及 Windows 验收记录      | 对应任务 |
 
 Vue 页面使用 `<script setup lang="ts">`。路由页和 `App.vue` 只组合组件；跨页面的活动会话由一个 store 维护，页面卸载不自行结束后台任务。基础组件放 `components/ui`，业务组件留在 feature 内。
 
@@ -81,13 +81,13 @@ export interface ArtifactVersion {
   taskId: string
   createdAt: string
   skills: SkillSnapshot[]
-  files: { path: string; size: number; sha256: string }[]
+  files: { path: string, size: number, sha256: string }[]
   zipSha256: string
 }
 
 export interface InstallManifest {
   targetDirectoryHint: string
-  entries: { source: string; target: string }[]
+  entries: { source: string, target: string }[]
 }
 
 export interface InstallationRecord {
@@ -112,8 +112,8 @@ export interface ModProject {
   latestVersionId?: string
   versions: ArtifactVersion[]
   installations: InstallationRecord[]
-  installedTargets: { targetDirectory: string; versionId?: string; state: 'known' | 'uncertain' }[]
-  sessions: { sessionId: string; sessionFile: string; skills: SkillSnapshot[]; readOnly: boolean }[]
+  installedTargets: { targetDirectory: string, versionId?: string, state: 'known' | 'uncertain' }[]
+  sessions: { sessionId: string, sessionFile: string, skills: SkillSnapshot[], readOnly: boolean }[]
 }
 
 export interface TaskContext {
@@ -169,13 +169,13 @@ export interface TaskRecord {
 
 严格顺序：`1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10`。共用契约、`lib.rs` 与配置文件不并行修改。
 
-| 检查点 | 完成任务 | 可交付结果 | 尚不代表 |
-| --- | --- | --- | --- |
-| A | 1–2 | 无 Key 创建/重开 MOD，工作台布局完整 | AI 已接入 |
-| B | 3–5 | RPC 生命周期、env、结构化会话与基础文件差异；离线协议检查 | 真实模型已通过 |
-| C | 6–7 | 可控 skills、通用命令、版本隔离 ZIP 登记 | Duckov API 与游戏效果已验证 |
-| D | 8–9 | Duckov 开发路径、版本管理、通用按钮安装 | 游戏加载与效果正确 |
-| E | 10 | Windows 内置运行时验收，以及用户补 Key 后的真实 Responses 往返 | 已对外发布或游戏效果已验证 |
+| 检查点 | 完成任务 | 可交付结果                                                     | 尚不代表                    |
+| ------ | -------- | -------------------------------------------------------------- | --------------------------- |
+| A      | 1–2      | 无 Key 创建/重开 MOD，工作台布局完整                           | AI 已接入                   |
+| B      | 3–5      | RPC 生命周期、env、结构化会话与基础文件差异；离线协议检查      | 真实模型已通过              |
+| C      | 6–7      | 可控 skills、通用命令、版本隔离 ZIP 登记                       | Duckov API 与游戏效果已验证 |
+| D      | 8–9      | Duckov 开发路径、版本管理、通用按钮安装                        | 游戏加载与效果正确          |
+| E      | 10       | Windows 内置运行时验收，以及用户补 Key 后的真实 Responses 往返 | 已对外发布或游戏效果已验证  |
 
 每任务结束记录：改动文件、实际检查命令与结果、未验证项、影响下一任务的阻塞。API Key 不属于实现检查点的阻塞：A–D 通过本地协议夹具、文件与交付夹具检查，真实模型验收统一属于 E，用户届时手动补 Key。其他直接相关实现阻塞先解决或请用户决定，不以“完成”跳过；最终未提供 Key 时只将 E 的真实模型验收标记为未执行。
 
@@ -230,8 +230,7 @@ it('handled 结束提交而不等待 settled', async () => {
   const transport = createFakeTransport()
   const client = createPiClient(transport)
   const submitted = client.prompt('需求')
-  transport.emit({ type: 'response', id: transport.lastRequestId,
-    command: 'prompt', success: true, data: { disposition: 'handled' } })
+  transport.emit({ type: 'response', id: transport.lastRequestId, command: 'prompt', success: true, data: { disposition: 'handled' } })
   await submitted
   expect(client.submissionState.value).toBe('finished')
 })
@@ -373,20 +372,20 @@ pnpm tauri build
 
 ## 7. 规格覆盖与完成标准
 
-| 设计要求 | 任务 | 完成证据 |
-| --- | --- | --- |
-| Vue/shadcn/Tailwind 与 Codex 布局 | 2、5 | 组件职责、实际窗口验收记录 |
-| 需求草稿持久化 | 1、4、5 | 无 Key 创建/输入/重开需求不丢失，发送失败保留 |
-| 文件变更与基础差异 | 3、5 | 任务源码基准、新增/修改/删除、历史差异与路径校验 |
-| Orbit 参考、RPC 主链路与必要 SDK 辅助 | 3、5 | 锁定协议、进程生命周期、恢复路径 |
-| Responses、env、指定模型 | 4、10 | 4 完成脱敏配置与无 Key 行为；10 用户补 Key 后真实往返 |
-| 通用 + 游戏 skills、导入与启停 | 6、7、8 | 加载清单、依赖闭包、上下文变化新会话 |
-| 不要求安装游戏、用户自行游戏验证 | 1、8 | 无游戏创建、缺依赖保存源码；没有自动游戏验收 |
-| 通用命令与 ZIP 交付 | 7、8 | 真实退出码、ZIP/文件一致、必要编译由 skill 执行 |
-| 应用任务与交付登记关联 | 3、7 | 任务上下文注入、实际命令记录、旧任务拒绝、重复登记幂等 |
-| 固定目录、版本隔离 | 1、7 | A/B 版本不覆盖，重开与导出固定版本 |
-| 按钮安装与版本状态 | 9 | 覆盖预览、成功关联、失败回退、异常可见 |
-| Windows 内置运行时 | 3、10 | 无全局依赖验收与资源完整记录 |
+| 设计要求                              | 任务    | 完成证据                                               |
+| ------------------------------------- | ------- | ------------------------------------------------------ |
+| Vue/shadcn/Tailwind 与 Codex 布局     | 2、5    | 组件职责、实际窗口验收记录                             |
+| 需求草稿持久化                        | 1、4、5 | 无 Key 创建/输入/重开需求不丢失，发送失败保留          |
+| 文件变更与基础差异                    | 3、5    | 任务源码基准、新增/修改/删除、历史差异与路径校验       |
+| Orbit 参考、RPC 主链路与必要 SDK 辅助 | 3、5    | 锁定协议、进程生命周期、恢复路径                       |
+| Responses、env、指定模型              | 4、10   | 4 完成脱敏配置与无 Key 行为；10 用户补 Key 后真实往返  |
+| 通用 + 游戏 skills、导入与启停        | 6、7、8 | 加载清单、依赖闭包、上下文变化新会话                   |
+| 不要求安装游戏、用户自行游戏验证      | 1、8    | 无游戏创建、缺依赖保存源码；没有自动游戏验收           |
+| 通用命令与 ZIP 交付                   | 7、8    | 真实退出码、ZIP/文件一致、必要编译由 skill 执行        |
+| 应用任务与交付登记关联                | 3、7    | 任务上下文注入、实际命令记录、旧任务拒绝、重复登记幂等 |
+| 固定目录、版本隔离                    | 1、7    | A/B 版本不覆盖，重开与导出固定版本                     |
+| 按钮安装与版本状态                    | 9       | 覆盖预览、成功关联、失败回退、异常可见                 |
+| Windows 内置运行时                    | 3、10   | 无全局依赖验收与资源完整记录                           |
 
 全部复选框仅在相应实现完成后勾选，检查记录不能用“计划会验证”替代。API Key 缺失不阻塞实现，真实模型检查只在最终 E 等待用户补 Key；参考依赖或 Windows 验收环境缺失时，相关验收保留未完成。可以报告实现已完成，不能报告整体已验收。
 
