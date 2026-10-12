@@ -20,7 +20,7 @@ const previewLevel = computed(() => props.thinkingLevels[previewIndex.value] ?? 
 const extendedThinking = computed(() => previewLevel.value === 'xhigh' || previewLevel.value === 'max')
 const progressWidth = computed(() => {
   const progress = previewIndex.value / Math.max(1, props.thinkingLevels.length - 1)
-  return `calc(${progress * 100}% + ${18 - 36 * progress}px)`
+  return `calc(${progress * 100}% + ${36 - 36 * progress}px)`
 })
 const defaultLevel = computed(() => {
   const order: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']

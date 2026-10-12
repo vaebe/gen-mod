@@ -25,7 +25,7 @@ const hasContext = computed(() => {
     return false
   }
   const project = projects.projects.find(item => item.modId === modId)
-  const selectedId = route.query.session ?? project?.sessions.at(-1)?.sessionId
+  const selectedId = route.query.session ?? project?.sessions[project.sessions.length - 1]?.sessionId
   return selectedId === session.sessionId && !!session.stateFor(modId, session.sessionId)?.initialized
 })
 // 隐藏不清除展开偏好，回到有效会话时恢复；抽屉关闭仍更新同一个开关。
