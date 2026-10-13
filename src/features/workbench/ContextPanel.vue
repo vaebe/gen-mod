@@ -4,6 +4,7 @@ import type { ModProject } from '@/contracts/mod'
 import type { VersionAction } from '@/features/mods/VersionActions.vue'
 import { useIntervalFn } from '@vueuse/core'
 import { computed, shallowRef, watch } from 'vue'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -355,10 +356,15 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
           </p>
           <div v-for="version in [...(artifactProject?.versions ?? [])].reverse()" :key="version.versionId" class="flex flex-col gap-2 border-b p-3 text-sm">
             <div class="flex items-center justify-between gap-2">
-              <span class="min-w-0 font-mono" :class="{ 'text-green-600': installedVersionIds.has(version.versionId), 'text-blue-600': !installedVersionIds.has(version.versionId) && artifactProject?.latestVersionId === version.versionId }" :title="version.versionId">
-                {{ version.versionId.slice(0, 8) }}
-                <span v-if="installedVersionIds.has(version.versionId)" class="sr-only">当前安装</span>
-              </span>
+              <div class="flex min-w-0 flex-wrap items-start gap-1.5">
+                <span class="font-mono" :title="version.versionId">{{ version.versionId.slice(0, 8) }}</span>
+                <Badge v-if="artifactProject?.latestVersionId === version.versionId" variant="secondary" class="shrink-0 border-blue-200 bg-blue-100 px-1.5 py-0 text-[10px] leading-4 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-950">
+                  最新
+                </Badge>
+                <Badge v-if="installedVersionIds.has(version.versionId)" variant="outline" class="shrink-0 border-green-200 bg-green-100 px-1.5 py-0 text-[10px] leading-4 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300">
+                  已安装
+                </Badge>
+              </div>
               <VersionActions :version-id="version.versionId" :busy="artifactActionsBusy" @action="artifactAction" />
             </div>
             <p class="text-muted-foreground">
