@@ -30,6 +30,7 @@ fn target_file(root: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 fn calculate(app: &tauri::AppHandle, mod_id: &str, version_id: &str, target: &str) -> Result<InstallPreview, String> {
+    crate::project_lifecycle::repository::ensure_writable(app,mod_id)?;
     let root = version_root(app, mod_id, version_id)?;
     let target = target_root(app, target)?;
     let project = mods::read_project(app, mod_id)?;

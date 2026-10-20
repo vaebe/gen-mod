@@ -3,12 +3,15 @@ import type { SourceTreeRow } from './useSourceBrowser'
 import { ChevronRight, FileCode, Folder, FolderOpen, LoaderCircle, LockKeyhole } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 
-defineProps<{ rows: SourceTreeRow[], selected: string, loading: boolean, error: string }>()
-defineEmits<{ select: [path: string], toggle: [path: string], retry: [path: string] }>()
+defineProps<{ rows: SourceTreeRow[], selected: string, selectedDirectory?: string, loading: boolean, error: string }>()
+defineEmits<{ select: [path: string], selectDirectory: [path: string], toggle: [path: string], retry: [path: string] }>()
 </script>
 
 <template>
   <nav aria-label="源码文件" class="min-h-0 overflow-auto py-2 text-xs">
+    <Button variant="ghost" size="sm" class="w-full justify-start rounded-none" :class="selectedDirectory === '' && !selected && 'bg-accent'" @click="$emit('selectDirectory', '')">
+      <Folder data-icon="inline-start" />source
+    </Button>
     <p v-if="loading" role="status" class="flex items-center gap-2 px-3 py-2 text-muted-foreground">
       <LoaderCircle class="size-3.5 animate-spin" />正在读取源码目录…
     </p>
@@ -23,11 +26,16 @@ defineEmits<{ select: [path: string], toggle: [path: string], retry: [path: stri
       源码目录为空。
     </p>
     <template v-for="row in rows" :key="row.path">
-      <button type="button" class="flex h-8 w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50" :class="selected === row.path && 'bg-accent text-accent-foreground'" :style="{ paddingLeft: `${row.depth * 14 + 10}px` }" :title="row.kind === 'blocked' ? `${row.path}（链接或特殊文件不可访问）` : row.path" :disabled="row.kind === 'blocked'" :aria-expanded="row.kind === 'directory' ? row.expanded : undefined" :aria-current="selected === row.path ? 'true' : undefined" @click="row.kind === 'directory' ? $emit('toggle', row.path) : $emit('select', row.path)">
-        <ChevronRight v-if="row.kind === 'directory'" class="size-3 shrink-0 transition-transform" :class="row.expanded && 'rotate-90'" /><span v-else class="w-3 shrink-0" />
-        <LoaderCircle v-if="row.loading" class="size-3.5 shrink-0 animate-spin text-muted-foreground" /><FolderOpen v-else-if="row.kind === 'directory' && row.expanded" class="size-3.5 shrink-0 text-muted-foreground" /><Folder v-else-if="row.kind === 'directory'" class="size-3.5 shrink-0 text-muted-foreground" /><LockKeyhole v-else-if="row.kind === 'blocked'" class="size-3.5 shrink-0" /><FileCode v-else class="size-3.5 shrink-0 text-muted-foreground" />
-        <span class="truncate font-mono">{{ row.name }}</span>
-      </button>
+      <div class="flex items-center" :style="{ paddingLeft: `${row.depth * 14}px` }">
+        <Button v-if="row.kind === 'directory'" variant="ghost" size="icon" class="size-7 shrink-0 rounded-none" :aria-label="`${row.expanded ? '收起' : '展开'} ${row.name}`" :aria-expanded="row.expanded" @click="$emit('toggle', row.path)">
+          <ChevronRight :class="row.expanded && 'rotate-90'" />
+        </Button>
+        <span v-else class="w-7 shrink-0" />
+        <Button variant="ghost" size="sm" class="min-w-0 flex-1 justify-start rounded-none" :class="(selected === row.path || (row.kind === 'directory' && selectedDirectory === row.path)) && 'bg-accent text-accent-foreground'" :title="row.kind === 'blocked' ? `${row.path}（链接或特殊文件不可访问）` : row.path" :disabled="row.kind === 'blocked'" :aria-current="selected === row.path || selectedDirectory === row.path ? 'true' : undefined" @click="row.kind === 'directory' ? $emit('selectDirectory', row.path) : $emit('select', row.path)">
+          <LoaderCircle v-if="row.loading" class="animate-spin" /><FolderOpen v-else-if="row.kind === 'directory' && row.expanded" /><Folder v-else-if="row.kind === 'directory'" /><LockKeyhole v-else-if="row.kind === 'blocked'" /><FileCode v-else />
+          <span class="truncate font-mono">{{ row.name }}</span>
+        </Button>
+      </div>
       <div v-if="row.expanded && row.error" :style="{ paddingLeft: `${row.depth * 14 + 30}px` }" class="space-y-1 py-2 pr-3">
         <p role="alert" class="break-words text-destructive">
           {{ row.error }}

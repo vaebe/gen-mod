@@ -1,4 +1,4 @@
-import type { ModProject } from '../contracts/mod'
+import type { DeleteProjectResult, ModProject } from '../contracts/mod'
 import { invoke } from '@tauri-apps/api/core'
 
 /** 原生错误统一为可展示的 Error，调用方负责保留用户输入。 */
@@ -12,6 +12,15 @@ export async function nativeCall<T>(command: string, args?: Record<string, unkno
 }
 
 export const modService = {
+  archive(modId: string, expectedRevision: number, archived: boolean): Promise<ModProject> {
+    return nativeCall('set_mod_archived', { modId, expectedRevision, archived })
+  },
+  archived(): Promise<ModProject[]> {
+    return nativeCall('list_archived_mods')
+  },
+  remove(modId: string, expectedRevision: number): Promise<DeleteProjectResult> {
+    return nativeCall('delete_mod', { modId, expectedRevision })
+  },
   create(name: string, gameSkillName: string, requirement: string): Promise<ModProject> {
     return nativeCall('create_mod', { name, gameSkillName, requirement })
   },

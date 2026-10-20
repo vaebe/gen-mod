@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { VersionAction } from './VersionActions.vue'
 import type { ArtifactVersion } from '@/contracts/mod'
+import type { VerificationRecord } from '@/contracts/verification'
 import { Check, Copy } from '@lucide/vue'
 import { computed, onBeforeUnmount, shallowRef } from 'vue'
 import { Badge } from '@/components/ui/badge'
@@ -9,9 +10,13 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/u
 import VersionActions from './VersionActions.vue'
 
 export type { VersionAction } from './VersionActions.vue'
-const props = defineProps<{ versions: ArtifactVersion[], latest?: string, installed: string[], busy: boolean }>()
+const props = defineProps<{ versions: ArtifactVersion[], latest?: string, installed: string[], busy: boolean, readOnly?: boolean, verificationRecords?: VerificationRecord[] }>()
 defineEmits<{ action: [kind: VersionAction, id: string] }>()
 const versionsNewestFirst = computed(() => [...props.versions].reverse())
+function verificationLabel(versionId: string): string {
+  const record = props.verificationRecords?.find(item => item.versionId === versionId)
+  return record ? { passed: '玩家确认通过', partial: '玩家确认部分通过', failed: '玩家确认失败', unknown: '玩家结果未确认' }[record.payload.result] : '待玩家验证'
+}
 const copiedId = shallowRef('')
 const copyError = shallowRef('')
 let copyTimer: ReturnType<typeof setTimeout> | undefined
@@ -58,6 +63,9 @@ onBeforeUnmount(() => clearTimeout(copyTimer))
         <span class="version-date text-xs text-muted-foreground" :title="new Date(version.createdAt).toLocaleString()">{{ shortDate(version.createdAt) }}</span>
         <span class="version-files text-xs text-muted-foreground">{{ version.files.length }}</span>
         <div class="flex flex-wrap items-center gap-1">
+          <Badge variant="outline">
+            {{ verificationLabel(version.versionId) }}
+          </Badge>
           <Badge v-if="latest === version.versionId" variant="secondary">
             最新
           </Badge>
@@ -65,7 +73,7 @@ onBeforeUnmount(() => clearTimeout(copyTimer))
             已安装
           </Badge>
         </div>
-        <VersionActions :version-id="version.versionId" :busy="busy" @action="(kind, id) => $emit('action', kind, id)" />
+        <VersionActions :version-id="version.versionId" :busy="busy" :read-only="readOnly" @action="(kind, id) => $emit('action', kind, id)" />
       </div>
     </div>
   </section>

@@ -1,0 +1,2 @@
+ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE project_removals(mod_id TEXT PRIMARY KEY,operation_id TEXT NOT NULL UNIQUE,removed_at TEXT NOT NULL);

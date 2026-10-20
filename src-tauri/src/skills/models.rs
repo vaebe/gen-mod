@@ -15,6 +15,8 @@ pub struct SkillDefinition {
     pub exclude_paths: Vec<String>,
     #[serde(default)]
     pub required_command_scripts: Vec<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub inspection_file: Option<String>,
 }
 
 #[derive(Serialize)]

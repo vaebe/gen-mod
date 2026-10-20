@@ -8,17 +8,59 @@ struct Lease { task: String, tool: String, operation: String, path: Option<Strin
 struct State {
     queue: VecDeque<String>, leases: BTreeMap<String,Lease>, cancelled: std::collections::BTreeSet<String>,
     completed_commands: BTreeMap<(String,String),u64>, observed: BTreeMap<(String,String),Option<String>>, revision: u64, fingerprint: Option<String>,
+    native_operation: Option<(String, NativeOperation)>,
 }
 #[derive(Default)]
 struct Workspace { state: Mutex<State>, wake: Condvar }
 #[derive(Default)]
 pub struct Workspaces(Mutex<BTreeMap<String,Arc<Workspace>>>);
+#[derive(Clone, Copy, Debug)]
+pub enum NativeOperation { SourceChange, TaskPrepare, ProcessConnect, ProjectLifecycle }
+
+pub struct NativeReservation { workspace: Arc<Workspace>, operation_id: String }
+impl NativeReservation {
+    pub fn observe_fingerprint(&self, fingerprint: String) -> Result<u64, String> {
+        let mut state = self.workspace.state.lock().map_err(|_| "工作区锁异常")?;
+        if state.native_operation.as_ref().map(|v| &v.0) != Some(&self.operation_id) {
+            return Err("原生项目预留已失效".into());
+        }
+        if state.fingerprint.as_ref() != Some(&fingerprint) { state.revision += 1; }
+        state.fingerprint = Some(fingerprint);
+        Ok(state.revision)
+    }
+}
+impl Drop for NativeReservation {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.workspace.state.lock() {
+            if state.native_operation.as_ref().map(|v| &v.0) == Some(&self.operation_id) {
+                state.native_operation = None;
+                self.workspace.wake.notify_all();
+            }
+        }
+    }
+}
 impl Workspaces {
+    pub fn forget_project(&self,id: &str) -> Result<(),String> {
+        self.0.lock().map_err(|_| "工作区注册表锁异常")?.remove(id);
+        Ok(())
+    }
     fn workspace(&self, id: &str) -> Result<Arc<Workspace>, String> {
         Ok(self.0.lock().map_err(|_| "工作区注册表锁异常")?.entry(id.into()).or_default().clone())
     }
+    pub fn try_reserve_native(&self, mod_id: &str, operation: NativeOperation) -> Result<NativeReservation, String> {
+        let workspace = self.workspace(mod_id)?;
+        let mut state = workspace.state.lock().map_err(|_| "工作区锁异常")?;
+        if state.native_operation.is_some() || !state.leases.is_empty() || !state.queue.is_empty() {
+            return Err("当前项目正在操作，请完成后重试".into());
+        }
+        let operation_id = uuid::Uuid::new_v4().to_string();
+        state.native_operation = Some((operation_id.clone(), operation));
+        drop(state);
+        Ok(NativeReservation { workspace, operation_id })
+    }
     /// 排队线程不持会话槽锁；FIFO 不允许新读取越过等待写入。
     pub fn acquire(&self, app: &tauri::AppHandle, context: &super::tasks::TaskContext, request: &Value) -> Result<Value,String> {
+        crate::project_lifecycle::repository::ensure_writable(app,&context.mod_id)?;
         let id = request["leaseId"].as_str().ok_or("租约缺少 ID")?.to_owned(); paths::validate_id(&id)?;
         let tool = request["toolCallId"].as_str().ok_or("租约缺少工具 ID")?.to_owned();
         let operation = request["operation"].as_str().ok_or("租约缺少操作")?.to_owned();
@@ -29,6 +71,7 @@ impl Workspaces {
         if let Some(path) = &path { if path != "." { checked_file(context,path)?; } }
         let workspace = self.workspace(&context.mod_id)?;
         let mut state = workspace.state.lock().map_err(|_| "工作区锁异常")?;
+        if state.native_operation.is_some() { return Err("当前项目正在执行原生操作，请稍后重试".into()); }
         if state.cancelled.remove(&id) { return Err("工作区等待已取消".into()); }
         let observed_revision = state.revision;
         state.queue.push_back(id.clone());
@@ -46,6 +89,7 @@ impl Workspaces {
         }
         state.queue.pop_front();
         let result = (|| {
+            crate::project_lifecycle::repository::ensure_writable(app,&context.mod_id)?;
             let fingerprint = fingerprint(app,context)?;
             if state.fingerprint.as_ref().is_some_and(|v| v != &fingerprint) { state.revision += 1; }
             state.fingerprint = Some(fingerprint);
@@ -148,4 +192,67 @@ fn fingerprint(app: &tauri::AppHandle, context: &super::tasks::TaskContext) -> R
     let mut excludes = vec![".delivery".into()];
     excludes.extend(crate::skills::registry::resolve(app,&project.game_skill_name)?.into_iter().flat_map(|s|s.definition.exclude_paths));
     changes::source_fingerprint(std::path::Path::new(&context.source_directory),&excludes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_reservation_is_project_scoped_and_released_on_drop() {
+        let workspaces = Workspaces::default();
+        let first = workspaces.try_reserve_native("one", NativeOperation::SourceChange).unwrap();
+        assert!(workspaces.try_reserve_native("one", NativeOperation::TaskPrepare).is_err());
+        let other = workspaces.try_reserve_native("two", NativeOperation::TaskPrepare).unwrap();
+        drop(first);
+        assert!(workspaces.try_reserve_native("one", NativeOperation::TaskPrepare).is_ok());
+        drop(other);
+    }
+
+    #[test]
+    fn concurrent_source_and_task_reservations_have_one_winner() {
+        let workspaces = Arc::new(Workspaces::default());
+        let start = Arc::new(std::sync::Barrier::new(3));
+        let finish = Arc::new(std::sync::Barrier::new(3));
+        let handles: Vec<_> = [NativeOperation::SourceChange, NativeOperation::TaskPrepare].into_iter().map(|operation| {
+            let (workspaces, start, finish) = (workspaces.clone(), start.clone(), finish.clone());
+            std::thread::spawn(move || {
+                start.wait();
+                let reservation = workspaces.try_reserve_native("one", operation);
+                let won = reservation.is_ok();
+                finish.wait();
+                drop(reservation);
+                won
+            })
+        }).collect();
+        start.wait();
+        finish.wait();
+        assert_eq!(handles.into_iter().map(|handle| handle.join().unwrap()).filter(|won| *won).count(), 1);
+    }
+
+    #[test]
+    fn native_reservation_rejects_an_existing_source_lease() {
+        let workspaces = Workspaces::default();
+        let workspace = workspaces.workspace("one").unwrap();
+        workspace.state.lock().unwrap().leases.insert("lease".into(), Lease {
+            task: "task".into(), tool: "tool".into(), operation: "read".into(), path: None,
+            write: false, revision: 0, before: BTreeMap::new(),
+        });
+        assert!(workspaces.try_reserve_native("one", NativeOperation::SourceChange).is_err());
+    }
+    #[test]
+    fn process_connect_and_lifecycle_reserve_before_each_others_critical_phase(){
+        for first in [NativeOperation::ProcessConnect,NativeOperation::ProjectLifecycle] {
+            let workspaces=Arc::new(Workspaces::default());
+            let checked=Arc::new(std::sync::Barrier::new(2));let release=Arc::new(std::sync::Barrier::new(2));
+            let worker={let (workspaces,checked,release)=(workspaces.clone(),checked.clone(),release.clone());std::thread::spawn(move||{
+                let _reservation=workspaces.try_reserve_native("p",first).unwrap();checked.wait();release.wait();
+            })};
+            checked.wait();
+            let other=match first {NativeOperation::ProcessConnect=>NativeOperation::ProjectLifecycle,_=>NativeOperation::ProcessConnect};
+            assert!(workspaces.try_reserve_native("p",other).is_err());
+            assert!(workspaces.try_reserve_native("other",other).is_ok());
+            release.wait();worker.join().unwrap();assert!(workspaces.try_reserve_native("p",other).is_ok());
+        }
+    }
 }

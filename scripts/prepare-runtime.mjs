@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, cpSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, cpSync, readdirSync, statSync, realpathSync, lstatSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join, relative } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { materialize } from "./materialize-runtime.mjs";
 
@@ -79,6 +79,14 @@ const runtimeCopyOptions = {
   filter: (source, destination) => statSync(source).isDirectory() || !existsSync(destination) || !readFileSync(source).equals(readFileSync(destination)),
 };
 if (existsSync(join(root, "runtime/extensions"))) {
+  // cpSync 不移除旧文件；只清理本轮明确退役的两个分发文件。
+  for (const name of ["extensions/assets.ts", "helpers/process-image.ps1"]) {
+    const target = join(portable, name);
+    if (!existsSync(target)) { continue; }
+    const relation = relative(realpathSync(portable), realpathSync(target));
+    if (isAbsolute(relation) || relation.startsWith("..") || lstatSync(target).isSymbolicLink() || !lstatSync(target).isFile()) { throw new Error("退役资源路径异常，未删除"); }
+    unlinkSync(target);
+  }
   cpSync(join(root, "runtime/extensions"), join(portable, "extensions"), runtimeCopyOptions);
 }
 cpSync(join(root, "runtime/helpers"), join(portable, "helpers"), runtimeCopyOptions);

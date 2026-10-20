@@ -2,13 +2,16 @@
 import type { ModProject } from '@/contracts/mod'
 import type { PromptAttachment } from '@/contracts/session'
 import type { TaskRecord } from '@/contracts/task'
+import type { VerificationRecord } from '@/contracts/verification'
 import { RotateCw, Unplug } from '@lucide/vue'
-import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { useConfiguration } from '@/features/settings/useConfiguration'
+import { useVerification } from '@/features/verification/useVerification'
 import { modService, nativeCall } from '@/services/native'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
@@ -17,6 +20,7 @@ import ChatComposer from './ChatComposer.vue'
 import MessageTimeline from './MessageTimeline.vue'
 import { useDraft } from './useDraft'
 
+const VerificationHistory = defineAsyncComponent(() => import('@/features/verification/VerificationHistory.vue'))
 const route = useRoute()
 const router = useRouter()
 const project = shallowRef<ModProject>()
@@ -33,6 +37,22 @@ const { requirement, error: saveError } = draft
 const configuration = useConfiguration()
 const { status } = configuration
 const session = useSessionStore()
+const verification = useVerification(() => project.value?.modId, () => session.verificationRevision)
+const pendingFeedback = computed(() => verification.data.value.drafts.filter(d => d.status === 'pending' && d.payload.sourceRefs.some(ref => ref.sessionId === session.sessionId)))
+async function repair(record: VerificationRecord): Promise<void> {
+  const target = project.value?.modId
+  if (!target || record.modId !== target) {
+    return
+  }
+  const text = `请修复交付版本 ${record.versionId}，玩家确认记录 ${record.recordId}：\n${record.payload.observations}\n结果：${record.payload.result}。先核对当前源码与该版本的差异。`
+  if (session.readOnly) {
+    await openSession(undefined, false)
+  }
+  if (session.readOnly || project.value?.modId !== target || session.modId !== target) {
+    return
+  }
+  requirement.value = requirement.value.trim() ? `${requirement.value}\n\n${text}` : text
+}
 const attachments = computed({ get: () => session.attachments, set: (value: PromptAttachment[]) => {
   session.attachments = value
 } })
@@ -103,7 +123,7 @@ async function openSession(id?: string, readOnly = false): Promise<void> {
   error.value = ''
   try {
     const modId = project.value.modId
-    await session.open(modId, id, readOnly)
+    await session.open(modId, id, project.value.archived || readOnly)
     if (epoch !== loadGeneration || project.value?.modId !== modId || (id && session.sessionId !== id)) {
       return
     }
@@ -120,7 +140,7 @@ async function openSession(id?: string, readOnly = false): Promise<void> {
     session.task = tasks.value.find(item => item.context.sessionId === session.sessionId)?.context
     project.value = await modService.get(project.value.modId)
     projects.upsert(project.value)
-    session.readOnly = project.value.sessions.find(item => item.sessionId === session.sessionId)?.readOnly ?? readOnly
+    session.readOnly = project.value.archived || (project.value.sessions.find(item => item.sessionId === session.sessionId)?.readOnly ?? readOnly)
   }
   catch (cause) { error.value = (cause as Error).message }
   finally {
@@ -162,7 +182,7 @@ watch(() => [String(route.params.modId), String(route.query.session ?? ''), Stri
       throw new Error('该会话已删除或不属于当前项目')
     }
     if (!fresh && previous?.sessionId === session.sessionId && session.modId === id && session.stateFor(id, previous.sessionId)?.initialized) {
-      session.readOnly = previous.readOnly
+      session.readOnly = value.archived || previous.readOnly
       const metadata = await nativeCall<{ draft: string }>('read_session_metadata', { modId: id, sessionId: previous.sessionId })
       if (generation !== loadGeneration) {
         return
@@ -177,7 +197,7 @@ watch(() => [String(route.params.modId), String(route.query.session ?? ''), Stri
     }
     await openSession(previous?.sessionId, previous?.readOnly)
     if (generation === loadGeneration && session.sessionId && !error.value) {
-      await router.replace({ path: route.path, query: { session: session.sessionId } })
+      await router.replace({ path: route.path, query: { session: session.sessionId, ...(route.query.repair ? { repair: route.query.repair } : {}) } })
     }
   }
   catch (cause) {
@@ -236,12 +256,25 @@ async function send(): Promise<void> {
   }
 }
 
+const handledRepair = new Set<string>()
+watch(() => [String(route.query.repair ?? ''), opening.value, loadingProject.value, verification.data.value.records] as const, async ([recordId, isOpening, isLoading, records]) => {
+  if (!recordId || isOpening || isLoading || handledRepair.has(recordId) || session.modId !== project.value?.modId) {
+    return
+  }
+  const record = records.find(item => item.recordId === recordId)
+  if (!record) {
+    return
+  }
+  handledRepair.add(recordId)
+  await repair(record)
+  await router.replace({ path: route.path, query: { session: session.sessionId } })
+})
 async function leave(): Promise<boolean> {
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = undefined
   }
-  return draft.flush()
+  return project.value && (project.value.archived || projects.isRemoved(project.value.modId)) ? true : draft.flush()
 }
 /** 原生终态事件之后读取任务结束时间及新版本，不用前端猜测完成。 */
 watch(() => [session.changeRevision, session.artifactRevision, session.task?.taskId], async () => {
@@ -272,6 +305,9 @@ onBeforeRouteUpdate(leave)
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
+    <p v-if="project && session.task?.contextSnapshotId" class="shrink-0 px-4 py-2 text-xs text-muted-foreground">
+      本轮使用项目记忆快照 {{ session.task.contextSnapshotId.slice(0, 8) }}
+    </p>
     <Alert v-if="connectionIssue" :role="runtimeClosed ? 'status' : 'alert'" :variant="runtimeClosed ? 'default' : 'destructive'" class="shrink-0">
       <Unplug v-if="runtimeClosed" />
       <AlertTitle>{{ runtimeClosed ? '会话连接已断开' : '会话连接异常' }}</AlertTitle>
@@ -288,7 +324,7 @@ onBeforeRouteUpdate(leave)
     <p v-if="opening" class="px-5 py-3 text-xs text-muted-foreground">
       正在恢复会话历史…
     </p>
-    <MessageTimeline v-if="project && session.modId === project.modId && (session.chat.messages.length || session.working)" :key="`${session.modId}-${session.sessionId}`" :messages="session.chat.messages" :tools="session.chat.tools" :mod-id="String(route.params.modId)" :tasks="tasks.filter(item => item.context.sessionId === session.sessionId)" :working="session.working" :started-at="session.startedAt" :ended-at="session.endedAt" :activity="session.activity" :last-activity-at="session.lastActivityAt" />
+    <MessageTimeline v-if="project && session.modId === project.modId && (session.chat.messages.length || session.working)" :key="`${session.modId}-${session.sessionId}`" :messages="session.chat.messages" :tools="session.chat.tools" :mod-id="String(route.params.modId)" :tasks="tasks.filter(item => item.context.sessionId === session.sessionId)" :working="session.working" :started-at="session.startedAt" :ended-at="session.endedAt" :activity="session.activity" :last-activity-at="session.lastActivityAt" :feedback-drafts="pendingFeedback" :verification-records="verification.data.value.records" @feedback-changed="verification.refresh" />
     <div v-else-if="loadingProject || opening" role="status" class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
       正在加载会话…
     </div>
@@ -308,11 +344,24 @@ onBeforeRouteUpdate(leave)
         补充要求{{ input.status === 'handled' ? '已处理，未关联到正式历史' : '尚未确认执行' }}，不会自动重发：{{ input.message }}
       </p>
     </div>
+    <Collapsible v-if="verification.data.value.records.length" class="max-h-56 shrink-0 overflow-auto border-t px-5 py-2">
+      <CollapsibleTrigger as-child>
+        <Button variant="ghost" size="sm">
+          玩家验收历史（{{ verification.data.value.records.length }}）
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <VerificationHistory :records="verification.data.value.records" :read-only="session.readOnly" @repair="repair" />
+      </CollapsibleContent>
+    </Collapsible>
+    <p v-if="verification.error.value" role="alert" class="px-5 text-xs text-destructive">
+      {{ verification.error.value }}
+    </p>
     <p v-if="session.readOnly" class="border-t px-5 py-5 text-xs text-muted-foreground">
-      此会话使用旧的能力上下文，只能查看历史。创建新会话继续开发。
+      {{ project?.archived ? '项目已归档，仅可查看；在全部项目的“已归档项目”中恢复后继续制作。' : '此会话使用旧的能力上下文，只能查看历史。创建新会话继续开发。' }}
     </p>
     <ChatComposer v-else-if="project" v-model="requirement" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-steer="session.canSteer && !sending" :stopping="session.stopping" :busy="session.busy || sending || opening" :configured="modelConfigured && !opening" :providers="status?.providers || []" :model-state="session.modelState" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @model="session.selectModel" @thinking="session.setThinking" @compact="session.compact" />
-    <p v-if="project && status && !modelConfigured" class="px-5 pb-3 text-xs text-muted-foreground">
+    <p v-if="project && status && !modelConfigured && !session.readOnly" class="px-5 pb-3 text-xs text-muted-foreground">
       请在输入框选择可用模型，或在<RouterLink to="/settings" class="underline underline-offset-2">
         设置页
       </RouterLink>完善模型服务和 Key；当前需求仍会保存。

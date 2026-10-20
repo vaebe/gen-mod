@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { access, mkdir, open, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export interface TaskContext { taskId: string; modId: string; sessionId: string; generation: number; sourceDirectory: string; stagingId: string; stagingDirectory: string; createdAt: string }
+export interface TaskContext { contextSnapshotId?: string; memoryBootstrapPath?: string; memoryBootstrapSha256?: string; taskId: string; modId: string; sessionId: string; generation: number; sourceDirectory: string; stagingId: string; stagingDirectory: string; createdAt: string }
 export interface Receipt { sourceRevision: number; taskId: string; commandId: string; toolCallId: string; exitCode: number | null; status: "succeeded" | "failed" | "cancelled"; logPath: string; program: string; args: string[]; pid?: number; startedAt: string; durationMs: number; outputTail: string; startupError?: string }
 export function context(): TaskContext {
   const raw = process.env.GEN_MOD_TASK_CONTEXT;

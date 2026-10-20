@@ -99,6 +99,7 @@ pub fn import(app: &tauri::AppHandle) -> Result<(), String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let id = entry.file_name().to_string_lossy().into_owned();
         if paths::validate_id(&id).is_err() || !entry.file_type().map_err(|e| e.to_string())?.is_dir() { continue; }
+        if db.query_row::<bool,_,_>("SELECT EXISTS(SELECT 1 FROM project_removals WHERE mod_id=?1)",[&id],|r|r.get(0)).map_err(|e|e.to_string())? {continue;}
         let done: Option<String> = db.query_row("SELECT mod_id FROM projects WHERE mod_id=?1",[&id],|r| r.get(0)).optional().map_err(|e| e.to_string())?;
         if done.is_some() { continue; }
         if let Err(error) = project(app,&id) {

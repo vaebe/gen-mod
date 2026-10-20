@@ -6,6 +6,9 @@ export interface TaskContext {
   sourceDirectory: string
   stagingId: string
   stagingDirectory: string
+  contextSnapshotId?: string
+  memoryBootstrapPath?: string
+  memoryBootstrapSha256?: string
   createdAt: string
 }
 export interface CommandReceipt {

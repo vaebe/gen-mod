@@ -186,6 +186,7 @@ pub async fn export_version(app: tauri::AppHandle, mod_id: String, version_id: S
     let Some(target) = app.dialog().file().set_file_name(format!("mod-{version_id}.zip")).add_filter("ZIP", &["zip"]).blocking_save_file() else { return Ok(None); };
     let storage=app.state::<crate::storage::mods::StorageState>();
     let _lock=storage.0.lock().map_err(|_|"版本文件操作锁异常")?;
+    crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
     let root=crate::artifacts::registry::version_root(&app,&mod_id,&version_id)?;
     let file=crate::artifacts::registry::checked_path(&root,"mod.zip")?;
     if crate::changes::file_hash(&file)? != version.zip_sha256 { return Err("版本 ZIP 校验失败".into()); }

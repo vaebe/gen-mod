@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory=$true)][string]$ProjectPath,
     [Parameter(Mandatory=$true)][string]$ReferenceDirectory,
     [Parameter(Mandatory=$true)][string]$OutputDirectory

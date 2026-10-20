@@ -29,11 +29,12 @@ pub fn manifest(root: &Path) -> Result<InstallManifest, String> {
 }
 
 /// 仅由当前 prepare_delivery 成功结束事件调用；助手正文与前端没有登记入口。
-pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Delivery, input: &serde_json::Value) -> Result<ArtifactVersion, String> {
+pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Delivery, input: &serde_json::Value, known_secrets: &[String], cancelled: Option<&std::sync::atomic::AtomicBool>) -> Result<ArtifactVersion, String> {
     if delivery.task_id != task.context.task_id || delivery.staging_id != task.context.staging_id { return Err("交付不属于当前任务".into()); }
     app.state::<crate::pi::workspace::Workspaces>().validate_delivery(app,&task.context,&delivery.lease_id,delivery.source_revision)?;
     let storage = app.state::<mods::StorageState>();
     let _lock = storage.0.lock().map_err(|_| "项目存储锁异常")?;
+    crate::project_lifecycle::repository::ensure_writable(app,&task.context.mod_id)?;
     let project = mods::read_project(app, &task.context.mod_id)?;
     if let Some(id) = &task.registered_version_id { return project.versions.iter().find(|v| &v.version_id == id).cloned().ok_or("已登记版本记录缺失".into()); }
     if task.status != "running" { return Err("只有活动任务能够首次登记版本".into()); }
@@ -92,6 +93,12 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
         if format!("{:x}", actual.finalize()) != *hash { return Err("ZIP 与交付文件内容不一致".into()); }
     }
     if found.len() != hashes.len() { return Err("ZIP 缺少文件".into()); }
+    let restricted=super::content_check::restricted_for_task(app,&task.context)?;
+    let check_files=prepared.iter().map(|f|(f.path.clone(),f.path.clone())).collect::<Vec<_>>();
+    let report=super::content_check::check_files(&staging.join("files"),&check_files,known_secrets,&restricted)?;
+    if report.findings.iter().any(|f|f.level=="block"){return Err(format!("最终交付内容检查拒绝：{}；需要新任务",serde_json::to_string(&report).map_err(|e|e.to_string())?));}
+    let cases:Vec<super::delivery_metadata::VerificationCase>=input.get("verificationCases").map(|v|serde_json::from_value(v.clone())).transpose().map_err(|e|e.to_string())?.unwrap_or_default();
+    super::delivery_metadata::validate_cases(&cases)?;
     let version = ArtifactVersion { version_id: uuid::Uuid::new_v4().to_string(), task_id: task.context.task_id.clone(), created_at: mods::now()?, skills: project.sessions.iter().find(|s| s.session_id == task.context.session_id).ok_or("任务会话缺失")?.skills.clone(), files: prepared, zip_sha256: file_hash(&zip_path)? };
     let artifacts = project_root.join("artifacts");
     paths::reject_redirect(&artifacts)?;
@@ -110,10 +117,24 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
     let operation = serde_json::json!({"versionId":version.version_id,"taskId":task.context.task_id});
     crate::storage::repository::file_operation(app,&operation_id,&project.mod_id,"register","pending",&operation)?;
     fs::rename(temporary.path(), &final_directory).map_err(|e| e.to_string())?;
-    if let Err(error) = crate::storage::repository::update(app,&project.mod_id,|project| {
-        project.latest_version_id=Some(version.version_id.clone());
-        project.versions.push(version.clone()); project.development_status=DevelopmentStatus::Ready; project.updated_at=mods::now()?; Ok(())
-    }) {
+    if let Err(error) = (||->Result<(),String>{
+        app.state::<crate::pi::workspace::Workspaces>().validate_delivery(app,&task.context,&delivery.lease_id,delivery.source_revision)?;
+        let mut db=crate::storage::database::connect(app)?;
+        let tx=db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+        if cancelled.is_some_and(|v|v.load(std::sync::atomic::Ordering::SeqCst)){return Err("交付工具已结束或取消，未登记版本".into());}
+        let active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE task_id=?1 AND status='running')",[&task.context.task_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+        if !active{return Err("任务已停止，不能登记".into());}
+        let mut current=crate::storage::repository::read_on(&tx,&project.mod_id)?;
+        current.latest_version_id=Some(version.version_id.clone());current.versions.push(version.clone());current.development_status=DevelopmentStatus::Ready;current.updated_at=mods::now()?;
+        crate::storage::repository::save_on(&tx,&current,false)?;
+        super::delivery_metadata::ensure_anchor_on(&tx,&project.mod_id,&version)?;
+        let mut metadata=super::delivery_metadata::read_on(&tx,&project.mod_id,&version.version_id)?;
+        metadata.context_snapshot_id=task.context.context_snapshot_id.clone();metadata.check_report=Some(report);metadata.cases=cases;
+        super::delivery_metadata::save_on(&tx,&metadata)?;
+        let mut registered_task=task.clone();registered_task.registered_version_id=Some(version.version_id.clone());
+        crate::storage::repository::task_on(&tx,&registered_task)?;
+        tx.commit().map_err(|e|e.to_string())
+    })() {
         // 元数据失败时只清理本次新版本，保留所有既有版本。
         let actual = final_directory.canonicalize().map_err(|e| e.to_string())?;
         if actual.starts_with(artifacts.canonicalize().map_err(|e| e.to_string())?) { let _ = fs::remove_dir_all(actual); }
@@ -135,6 +156,7 @@ pub fn version_root(app: &tauri::AppHandle, mod_id: &str, version_id: &str) -> R
 #[tauri::command]
 pub fn delete_version(app: tauri::AppHandle, storage: tauri::State<mods::StorageState>, mod_id: String, version_id: String) -> Result<crate::storage::models::ModProject, String> {
     let _lock = storage.0.lock().map_err(|_| "项目存储锁异常")?;
+    crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
     let mut project = mods::read_project(&app, &mod_id)?;
     let project_root = paths::project_dir(&app, &mod_id)?;
     let artifacts = checked_path(&project_root, "artifacts")?.canonicalize().map_err(|e| e.to_string())?;
@@ -147,10 +169,16 @@ pub fn delete_version(app: tauri::AppHandle, storage: tauri::State<mods::Storage
     let operation = serde_json::json!({"versionId":version_id,"tombstone":temporary.file_name().ok_or("删除目录无效")?.to_string_lossy()});
     crate::storage::repository::file_operation(&app,&operation_id,&mod_id,"delete","pending",&operation)?;
     fs::rename(&root, &temporary).map_err(|e| e.to_string())?;
+    super::delivery_metadata::ensure_anchor_on(&crate::storage::database::connect(&app)?,&mod_id,project.versions.iter().find(|v|v.version_id==version_id).ok_or("版本不存在")?)?;
     project.versions.retain(|version| version.version_id != version_id);
     if project.latest_version_id.as_deref() == Some(&version_id) { project.latest_version_id = project.versions.last().map(|version| version.version_id.clone()); }
     if project.versions.is_empty() && matches!(project.development_status, DevelopmentStatus::Ready) { project.development_status = DevelopmentStatus::Generated; }
-    if let Err(error) = crate::storage::repository::save(&app, &mut project) {
+    if let Err(error) = (||->Result<(),String>{
+        let mut db=crate::storage::database::connect(&app)?;let tx=db.transaction().map_err(|e|e.to_string())?;
+        crate::storage::repository::save_on(&tx,&project,false)?;
+        super::delivery_metadata::mark_deleted_on(&tx,&mod_id,&version_id,true)?;
+        tx.commit().map_err(|e|e.to_string())?;project.revision+=1;Ok(())
+    })() {
         fs::rename(&temporary, &root).map_err(|restore| format!("{error}；版本目录恢复失败：{restore}"))?;
         return Err(error);
     }

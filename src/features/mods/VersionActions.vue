@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 export type VersionAction = 'details' | 'install' | 'export' | 'open' | 'delete'
-defineProps<{ versionId: string, busy: boolean }>()
+defineProps<{ versionId: string, busy: boolean, readOnly?: boolean }>()
 defineEmits<{ action: [kind: VersionAction, id: string] }>()
 const actions = [
   { kind: 'details', label: '查看详情', icon: Eye },
@@ -26,7 +26,7 @@ const actions = [
       <DropdownMenuGroup>
         <template v-for="action in actions" :key="action.kind">
           <DropdownMenuSeparator v-if="action.kind === 'delete'" />
-          <DropdownMenuItem :disabled="busy" :class="action.kind === 'delete' && 'text-destructive'" @select="$emit('action', action.kind, versionId)">
+          <DropdownMenuItem :disabled="busy || (readOnly && ['install', 'export', 'delete'].includes(action.kind))" :class="action.kind === 'delete' && 'text-destructive'" @select="$emit('action', action.kind, versionId)">
             <component :is="action.icon" />{{ action.label }}
           </DropdownMenuItem>
         </template>

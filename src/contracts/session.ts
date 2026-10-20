@@ -1,3 +1,5 @@
+import type { MemorySaveResult } from './knowledge'
+import type { ProjectMemoryUpdateResult } from './project-context'
 import type { SkillSnapshot } from './skill'
 
 /** pi 会话文件是历史权威；此处只保存关联信息。 */
@@ -59,6 +61,8 @@ export interface ToolRun {
   name: string
   args: unknown
   output?: unknown
+  memorySave?: MemorySaveResult
+  projectMemoryUpdate?: ProjectMemoryUpdateResult
   status: 'waiting' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 }
 

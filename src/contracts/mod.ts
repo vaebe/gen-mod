@@ -28,6 +28,8 @@ export interface InstallationRecord {
 
 /** 项目名可修改，modId 及所在目录不随名称变化。 */
 export interface ModProject {
+  revision: number
+  archived: boolean
   modId: string
   name: string
   gameId: string
@@ -43,3 +45,5 @@ export interface ModProject {
   installedTargets: { targetDirectory: string, versionId?: string, state: 'known' | 'uncertain' }[]
   sessions: SessionReference[]
 }
+
+export interface DeleteProjectResult { modId: string, removed: boolean, cleanupPending: boolean, message?: string | null }

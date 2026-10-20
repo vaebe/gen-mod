@@ -7,7 +7,7 @@ pub fn decode<T: serde::de::DeserializeOwned>(value: String) -> Result<T, String
 
 /// 从 projects 与未归档 sessions 组合既有 IPC DTO。
 pub fn read_on(db: &Connection, id: &str) -> Result<ModProject, String> {
-    let (payload, revision): (String, i64) = db.query_row("SELECT payload,revision FROM projects WHERE mod_id=?1", [id], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(|e| e.to_string())?.ok_or_else(|| {
+    let (payload, revision, archived): (String, i64, bool) = db.query_row("SELECT payload,revision,archived FROM projects WHERE mod_id=?1", [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(|e| e.to_string())?.ok_or_else(|| {
         let error: Option<String> = db.query_row("SELECT error FROM legacy_imports WHERE mod_id=?1", [id], |r| r.get(0)).optional().ok().flatten().flatten();
         error.map_or_else(|| "项目不存在".into(), |e| format!("项目迁移失败，禁止执行：{e}"))
     })?;
@@ -18,17 +18,27 @@ pub fn read_on(db: &Connection, id: &str) -> Result<ModProject, String> {
     payload.as_object_mut().ok_or("项目元数据不是 JSON 对象")?.insert("sessions".into(), serde_json::Value::Array(sessions));
     let mut project: ModProject = serde_json::from_value(payload).map_err(|e| e.to_string())?;
     project.revision = revision;
+    project.archived = archived;
     Ok(project)
 }
 pub fn read(app: &tauri::AppHandle, id: &str) -> Result<ModProject, String> {
     paths::validate_id(id)?;
+    let db=database::connect(app)?;
+    let project=read_on(&db,id)?;
     paths::reject_redirect(&paths::mods_root(app)?)?;
-    paths::reject_redirect(&paths::project_dir(app,id)?)?;
-    read_on(&database::connect(app)?, id)
+    let directory=paths::project_dir(app,id)?;
+    match std::fs::symlink_metadata(&directory) {
+        Ok(_)=>paths::reject_redirect(&directory)?,
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound && crate::project_lifecycle::repository::has_unresolved_removal_on(&db,id)?=>{},
+        Err(e)=>return Err(e.to_string()),
+    }
+    Ok(project)
 }
 
 /// 乐观 revision 拒绝陈旧整份 DTO；调用方需在存储锁内读取并提交。
 pub fn save_on(db: &Connection, project: &ModProject, creating: bool) -> Result<(), String> {
+    if !creating { crate::project_lifecycle::repository::ensure_writable_on(db,&project.mod_id)?; }
+    else if db.query_row::<bool,_,_>("SELECT EXISTS(SELECT 1 FROM project_removals WHERE mod_id=?1)",[&project.mod_id],|r|r.get(0)).map_err(|e|e.to_string())? { return Err("已移除的项目不能重新导入".into()); }
     let initial: Option<String> = if !creating && !project.sessions.is_empty() {
         db.query_row("SELECT json_extract(payload,'$.draftRequirement') FROM projects WHERE mod_id=?1 AND NOT EXISTS(SELECT 1 FROM sessions WHERE mod_id=?1 AND deleted=0)",[&project.mod_id],|r|r.get(0)).optional().map_err(|e|e.to_string())?.flatten()
     } else { None };
@@ -60,6 +70,7 @@ pub fn create(app: &tauri::AppHandle, project: &ModProject) -> Result<(), String
     let mut db = database::connect(app)?;
     let tx = db.transaction().map_err(|e| e.to_string())?;
     save_on(&tx,project,true)?;
+    crate::project_context::repository::initialize_on(&tx,&project.mod_id)?;
     tx.commit().map_err(|e| e.to_string())
 }
 /// 运行事件的局部更新在短事务内重读，避免版本、标题和部署状态互相覆盖。
@@ -67,6 +78,7 @@ pub fn update(app: &tauri::AppHandle, id: &str, operation: impl FnOnce(&mut ModP
     let mut db = database::connect(app)?;
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
     let mut project = read_on(&tx,id)?;
+    crate::project_lifecycle::repository::ensure_writable_on(&tx,id)?;
     operation(&mut project)?;
     save_on(&tx,&project,false)?;
     tx.commit().map_err(|e|e.to_string())?;
@@ -75,7 +87,7 @@ pub fn update(app: &tauri::AppHandle, id: &str, operation: impl FnOnce(&mut ModP
 }
 pub fn list(app: &tauri::AppHandle) -> Result<Vec<ModProject>, String> {
     let db = database::connect(app)?;
-    let mut query = db.prepare("SELECT mod_id FROM projects ORDER BY json_extract(payload,'$.updatedAt') DESC").map_err(|e| e.to_string())?;
+    let mut query = db.prepare("SELECT mod_id FROM projects WHERE archived=0 ORDER BY json_extract(payload,'$.updatedAt') DESC").map_err(|e| e.to_string())?;
     let ids = query.query_map([], |r| r.get::<_,String>(0)).map_err(|e| e.to_string())?;
     ids.map(|id| read_on(&db,&id.map_err(|e| e.to_string())?)).collect()
 }
@@ -95,7 +107,7 @@ pub fn task(app: &tauri::AppHandle, mod_id: &str, task_id: &str) -> Result<TaskR
     decode(payload)
 }
 pub fn log_on(db: &Connection, mod_id: &str, session_id: &str, entry: &RuntimeLogEntry) -> Result<(), String> {
-    db.execute("INSERT INTO runtime_logs(mod_id,session_id,task_id,timestamp,payload) VALUES(?1,?2,?3,?4,?5)",params![mod_id,session_id,entry.task_id,entry.timestamp,encode(entry)?]).map_err(|e| e.to_string())?;
+    if db.execute("INSERT INTO runtime_logs(mod_id,session_id,task_id,timestamp,payload) SELECT ?1,?2,?3,?4,?5 WHERE EXISTS(SELECT 1 FROM projects WHERE mod_id=?1 AND archived=0) AND NOT EXISTS(SELECT 1 FROM project_removals WHERE mod_id=?1) AND NOT EXISTS(SELECT 1 FROM file_operations WHERE mod_id=?1 AND kind='project_delete' AND status IN ('pending','requires_review'))",params![mod_id,session_id,entry.task_id,entry.timestamp,encode(entry)?]).map_err(|e| e.to_string())?!=1 {return Err("项目已不可写，未保存迟到日志".into());}
     db.execute("UPDATE sessions SET last_activity_at=?3 WHERE mod_id=?1 AND session_id=?2",params![mod_id,session_id,entry.timestamp]).map_err(|e|e.to_string())?;
     Ok(())
 }
@@ -125,6 +137,7 @@ pub fn interrupt_previous(app: &tauri::AppHandle) -> Result<(), String> {
 /// 草稿与强度属于目标会话，不通过整份项目 DTO 覆盖。
 pub fn save_preferences(app: &tauri::AppHandle, mod_id: &str, session_id: &str, draft: Option<&str>, thinking: Option<&str>) -> Result<(),String> {
     let db = database::connect(app)?;
+    crate::project_lifecycle::repository::ensure_writable_on(&db,mod_id)?;
     let count = db.execute("UPDATE sessions SET draft=COALESCE(?3,draft),thinking_level=COALESCE(?4,thinking_level) WHERE mod_id=?1 AND session_id=?2 AND deleted=0",params![mod_id,session_id,draft,thinking]).map_err(|e| e.to_string())?;
     if count != 1 { return Err("会话不存在或已删除".into()); } Ok(())
 }
@@ -142,6 +155,7 @@ pub fn model_preferences(app: &tauri::AppHandle, mod_id: &str, session_id: &str)
 pub fn save_model(app: &tauri::AppHandle, mod_id: &str, session_id: &str, selection: Option<&crate::config::ModelSelection>) -> Result<(), String> {
     let mut db = database::connect(app)?;
     let tx = db.transaction().map_err(|e| e.to_string())?;
+    crate::project_lifecycle::repository::ensure_writable_on(&tx,mod_id)?;
     // 更换模型后旧的上下文窗口统计不再适用，不能在重开聊天时继续显示。
     tx.execute("DELETE FROM session_stats WHERE mod_id=?1 AND session_id=?2 AND EXISTS(SELECT 1 FROM sessions WHERE mod_id=?1 AND session_id=?2 AND (provider_id IS NOT ?3 OR model_id IS NOT ?4))", params![mod_id,session_id,selection.map(|value| &value.provider_id),selection.map(|value| &value.model_id)]).map_err(|e| e.to_string())?;
     let count = tx.execute("UPDATE sessions SET provider_id=?3,model_id=?4 WHERE mod_id=?1 AND session_id=?2 AND deleted=0", params![mod_id,session_id,selection.map(|value| &value.provider_id),selection.map(|value| &value.model_id)]).map_err(|e| e.to_string())?;
@@ -182,9 +196,11 @@ pub fn list_migration_errors(app: tauri::AppHandle) -> Result<Vec<serde_json::Va
 }
 
 pub fn steering(app: &tauri::AppHandle, input: &serde_json::Value) -> Result<(),String> {
-    let db = database::connect(app)?;
-    db.execute("INSERT INTO steering_inputs VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(input_id) DO UPDATE SET status=excluded.status,payload=excluded.payload",params![input["inputId"].as_str(),input["modId"].as_str(),input["sessionId"].as_str(),input["taskId"].as_str(),input["generation"].as_i64(),input["submittedAt"].as_str(),input["status"].as_str(),encode(input)?]).map_err(|e|e.to_string())?;
-    Ok(())
+    let mut db = database::connect(app)?;
+    let tx=db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+    crate::project_lifecycle::repository::ensure_writable_on(&tx,input["modId"].as_str().ok_or("引导缺少项目身份")?)?;
+    tx.execute("INSERT INTO steering_inputs VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(input_id) DO UPDATE SET status=excluded.status,payload=excluded.payload",params![input["inputId"].as_str(),input["modId"].as_str(),input["sessionId"].as_str(),input["taskId"].as_str(),input["generation"].as_i64(),input["submittedAt"].as_str(),input["status"].as_str(),encode(input)?]).map_err(|e|e.to_string())?;
+    tx.commit().map_err(|e|e.to_string())
 }
 #[tauri::command]
 pub fn list_steering_inputs(app: tauri::AppHandle, mod_id: String, session_id: String) -> Result<Vec<serde_json::Value>,String> {
@@ -210,6 +226,7 @@ pub fn reconcile_files(app: &tauri::AppHandle) -> Result<(),String> {
     };
     for (id,mod_id,kind,payload) in pending {
         let payload: serde_json::Value = decode(payload)?;
+        if kind=="project_delete" {continue;}
         if kind=="install" {
             let mut record: super::models::InstallationRecord = serde_json::from_value(payload["record"].clone()).map_err(|e|e.to_string())?;
             update(app,&mod_id,|project| {
@@ -231,11 +248,16 @@ pub fn reconcile_files(app: &tauri::AppHandle) -> Result<(),String> {
             let artifacts=paths::project_dir(app,&mod_id)?.join("artifacts"); paths::reject_redirect(&artifacts)?;
             let temporary=artifacts.join(tombstone); let original=artifacts.join(version_id);
             let project=read(app,&mod_id)?;
+            crate::artifacts::delivery_metadata::mark_deleted_on(&db,&mod_id,version_id,!project.versions.iter().any(|v|v.version_id==version_id))?;
             if project.versions.iter().any(|v|v.version_id==version_id) && temporary.exists() && !original.exists() {
                 paths::reject_redirect(&temporary)?;
                 std::fs::rename(&temporary,&original).map_err(|e|e.to_string())?;
                 file_operation(app,&id,&mod_id,&kind,"reconciled",&payload)?;
             } else { file_operation(app,&id,&mod_id,&kind,"requires_review",&payload)?; }
+        } else if matches!(kind.as_str(),"source_import"|"source_move") {
+            crate::source_files::reconcile(app,&mod_id,&id,&kind,&payload)?;
+        } else if matches!(kind.as_str(),"asset_import"|"asset_process") {
+            crate::assets::reconcile(app,&mod_id,&id,&kind,&payload)?;
         } else if kind=="session_delete" {
             let session_id=payload["sessionId"].as_str().ok_or("会话删除记录缺少身份")?; paths::validate_id(session_id)?;
             let original=payload["original"].as_str().ok_or("会话删除记录缺少文件")?;
@@ -257,6 +279,7 @@ pub fn reconcile_files(app: &tauri::AppHandle) -> Result<(),String> {
         } else if kind=="register" {
             let project=read(app,&mod_id)?;
             let registered=project.versions.iter().any(|v|payload["versionId"]==v.version_id);
+            if let Some(version)=project.versions.iter().find(|v|payload["versionId"]==v.version_id){crate::artifacts::delivery_metadata::ensure_anchor_on(&db,&mod_id,version)?;crate::artifacts::delivery_metadata::mark_deleted_on(&db,&mod_id,&version.version_id,false)?;}
             file_operation(app,&id,&mod_id,&kind,if registered {"reconciled"} else {"requires_review"},&payload)?;
         } else { file_operation(app,&id,&mod_id,&kind,"requires_review",&payload)?; }
     }

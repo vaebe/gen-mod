@@ -1,4 +1,6 @@
 import type { PiRecord } from './types'
+import type { MemorySaveResult } from '@/contracts/knowledge'
+import type { ProjectMemoryUpdateResult } from '@/contracts/project-context'
 import type { ChatMessage, MessagePart, ToolRun } from '@/contracts/session'
 
 export interface ChatState {
@@ -14,6 +16,30 @@ export function emptyChat(): ChatState {
 }
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+// 只有原生工具的完成回执能生成管理入口，助手正文和流式片段不参与。
+function memoryReceipt(value: unknown): MemorySaveResult | undefined {
+  const item = object(value)
+  if (!['saved', 'unchanged', 'user_managed'].includes(String(item.outcome)) || typeof item.noteId !== 'string' || !item.noteId || !Number.isSafeInteger(item.revision) || Number(item.revision) < 1 || typeof item.title !== 'string') {
+    return
+  }
+  return { outcome: item.outcome as MemorySaveResult['outcome'], noteId: item.noteId, revision: Number(item.revision), title: item.title }
+}
+function projectMemoryReceipt(value: unknown): ProjectMemoryUpdateResult | undefined {
+  const item = object(value)
+  if (!['saved', 'unchanged'].includes(String(item.outcome)) || typeof item.modId !== 'string' || !item.modId || !Number.isSafeInteger(item.revision) || Number(item.revision) < 0 || !Array.isArray(item.changedFields) || !item.changedFields.every(field => ['gameVersion', 'prerequisites', 'confirmedRequirements'].includes(field))) {
+    return
+  }
+  return { outcome: item.outcome as ProjectMemoryUpdateResult['outcome'], modId: item.modId, revision: Number(item.revision), changedFields: item.changedFields }
+}
+function toolResult(output: unknown, isError: unknown): Pick<ToolRun, 'output' | 'status' | 'memorySave' | 'projectMemoryUpdate'> {
+  const details = object(object(output).details)
+  const status = isError || details.status === 'failed' ? 'failed' : details.status === 'cancelled' ? 'cancelled' : 'succeeded'
+  return { output, status, memorySave: status === 'succeeded' ? memoryReceipt(details.memorySave) : undefined, projectMemoryUpdate: status === 'succeeded' ? projectMemoryReceipt(details.projectMemoryUpdate) : undefined }
+}
+function historyOutput(message: Record<string, unknown>): unknown {
+  return message.details && typeof message.details === 'object' ? { content: message.content, details: message.details } : message.content
 }
 
 /** message_update 携带权威的累计消息；替换内容而非重复追加累计正文。 */
@@ -52,7 +78,7 @@ export function reduceRecord(state: ChatState, record: PiRecord): ChatState {
       const id = String(message.toolCallId ?? '')
       const previous = next.tools[id]
       if (previous) {
-        next.tools[id] = { ...previous, output: message.content, status: message.isError ? 'failed' : previous.status === 'failed' ? 'failed' : 'succeeded' }
+        next.tools[id] = { ...previous, ...toolResult(historyOutput(message), message.isError || previous.status === 'failed' || previous.status === 'cancelled') }
       }
       return next
     }
@@ -100,8 +126,7 @@ export function reduceRecord(state: ChatState, record: PiRecord): ChatState {
       toolCallId: id,
       name: String(record.toolName ?? previous?.name ?? '工具'),
       args: record.args ?? previous?.args,
-      output: record.result ?? record.partialResult ?? previous?.output,
-      status: record.type === 'tool_execution_end' ? record.isError || object(object(record.result).details).status === 'failed' ? 'failed' : object(object(record.result).details).status === 'cancelled' ? 'cancelled' : 'succeeded' : 'running',
+      ...(record.type === 'tool_execution_end' ? toolResult(record.result, record.isError) : { output: record.partialResult ?? previous?.output, status: 'running' }),
     }
   }
   else if (record.type === 'agent_settled') {
@@ -122,7 +147,7 @@ export function restoreChat(messages: unknown[]): ChatState {
     const message = object(raw)
     if (message.role === 'toolResult') {
       const id = String(message.toolCallId ?? '')
-      state.tools[id] = { toolCallId: id, name: String(message.toolName ?? '工具'), args: state.tools[id]?.args, output: message.content, status: message.isError ? 'failed' : 'succeeded' }
+      state.tools[id] = { toolCallId: id, name: String(message.toolName ?? '工具'), args: state.tools[id]?.args, ...toolResult(historyOutput(message), message.isError) }
     }
     else {
       const item = normalize(state, raw, `history-${index}-${String(message.timestamp ?? 0)}`, true)

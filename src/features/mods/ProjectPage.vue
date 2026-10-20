@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import type { ModProject } from '@/contracts/mod'
 import { ArrowUpRight, Folder, Plus } from '@lucide/vue'
-import { shallowRef } from 'vue'
+import { defineAsyncComponent, shallowRef } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -9,6 +10,10 @@ import NewModDialog from './NewModDialog.vue'
 
 const projects = useProjectsStore()
 const createOpen = shallowRef(false)
+const archivedOpen = shallowRef(false)
+const removing = shallowRef<ModProject>()
+const RemoveProjectDialog = defineAsyncComponent(() => import('./RemoveProjectDialog.vue'))
+const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProjectsDialog.vue'))
 </script>
 
 <template>
@@ -23,10 +28,17 @@ const createOpen = shallowRef(false)
           </h1><p class="mt-2 text-sm text-muted-foreground">
             从一个想法开始，保留每次修改与交付。
           </p>
-        </div><Button @click="createOpen = true">
-          <Plus class="size-4" />新建 MOD
-        </Button>
+        </div><div class="flex flex-wrap gap-2">
+          <Button variant="outline" @click="archivedOpen = true">
+            已归档项目
+          </Button><Button @click="createOpen = true">
+            <Plus class="size-4" />新建 MOD
+          </Button>
+        </div>
       </div>
+      <p v-if="projects.notice" role="status" class="mt-4 text-sm text-muted-foreground">
+        {{ projects.notice }}
+      </p>
       <p v-if="projects.error" role="alert" class="mt-8 text-sm text-destructive">
         {{ projects.error }}<Button variant="outline" size="sm" @click="projects.refresh">
           重试
@@ -51,8 +63,8 @@ const createOpen = shallowRef(false)
         </EmptyContent>
       </Empty>
       <div v-else class="mt-8 grid gap-3 md:grid-cols-2">
-        <RouterLink v-for="project in projects.projects" :key="project.modId" :to="`/mods/${project.modId}/chat`" class="group rounded-xl focus-visible:outline focus-visible:outline-ring">
-          <Card class="flex h-full flex-col">
+        <Card v-for="project in projects.projects" :key="project.modId" class="flex h-full flex-col">
+          <RouterLink :to="`/mods/${project.modId}/chat`" class="flex flex-1 flex-col gap-6 rounded-xl focus-visible:outline focus-visible:outline-ring">
             <CardHeader>
               <div class="flex items-center gap-3">
                 <Folder class="size-4 text-muted-foreground" /><CardTitle class="truncate">
@@ -63,12 +75,16 @@ const createOpen = shallowRef(false)
               <CardDescription class="line-clamp-2 min-h-10">
                 {{ project.draftRequirement || '打开项目，继续描述你的需求。' }}
               </CardDescription>
-            </CardContent><CardFooter class="justify-between gap-3 text-xs text-muted-foreground">
-              <span>{{ project.gameSkillName }}</span><span>{{ project.versions.length }} 个交付版本</span>
-            </CardFooter>
-          </Card>
-        </RouterLink>
+            </CardContent>
+          </RouterLink><CardFooter class="justify-between gap-3 text-xs text-muted-foreground">
+            <span>{{ project.gameSkillName }} · {{ project.versions.length }} 个交付版本</span><Button variant="ghost" size="sm" @click="removing = project">
+              移除
+            </Button>
+          </CardFooter>
+        </Card>
       </div>
     </div><NewModDialog v-model:open="createOpen" />
+    <RemoveProjectDialog v-model="removing" />
+    <ArchivedProjectsDialog v-model:open="archivedOpen" />
   </section>
 </template>

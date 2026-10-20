@@ -41,8 +41,44 @@ pub fn initialize(app: &tauri::AppHandle) -> Result<(), String> {
         tx.execute("INSERT INTO schema_migrations VALUES(2,?1)", [super::mods::now()?]).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
     }
+    for (version,sql) in [(3, include_str!("migrations/003_project_context.sql")),(4,include_str!("migrations/004_delivery_metadata.sql")),(5,include_str!("migrations/005_verification.sql")),(6,include_str!("migrations/006_knowledge.sql")),(7,include_str!("migrations/007_inspection.sql")),(8,include_str!("migrations/008_assets.sql")),(9,include_str!("migrations/009_memory.sql")),(10,include_str!("migrations/010_project_lifecycle.sql"))] {
+        let applied:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=?1)",[version],|r|r.get(0)).map_err(|e|e.to_string())?;
+        if !applied {
+            let tx=connection.transaction().map_err(|e|e.to_string())?;
+            if version==9 { crate::knowledge::repository::migrate_memory_on(&tx)?; }
+            else { tx.execute_batch(sql).map_err(|e|e.to_string())?; }
+            tx.execute("INSERT INTO schema_migrations VALUES(?1,?2)",rusqlite::params![version,super::mods::now()?]).map_err(|e|e.to_string())?;
+            tx.commit().map_err(|e|e.to_string())?;
+        }
+    }
     app.manage(Database(path));
+    crate::project_lifecycle::recovery::recover_pending(app)?;
     super::migration::import(app)?;
+    crate::project_context::repository::backfill(app)?;
+    crate::artifacts::delivery_metadata::backfill(app)?;
     super::repository::interrupt_previous(app)?;
     super::repository::reconcile_files(app)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn memory_migration_backfill_failure_restores_original_schema_and_rows() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("migrations/001_initial.sql")).unwrap();
+        db.execute_batch(include_str!("migrations/006_knowledge.sql")).unwrap();
+        db.execute("INSERT INTO projects VALUES('p','{}',0)", []).unwrap();
+        db.execute("INSERT INTO knowledge_notes VALUES('n','p','duckov',1,'active','{}')", []).unwrap();
+        {
+            let tx = db.transaction().unwrap();
+            assert!(crate::knowledge::repository::migrate_memory_on(&tx).is_err());
+        }
+        let (owner, count): (String, i64) = db.query_row("SELECT mod_id,COUNT(*) FROM knowledge_notes", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!(owner, "p");
+        assert_eq!(count, 1);
+        let extra_tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('knowledge_notes_next','memory_content_links','task_memory_uses')", [], |row| row.get(0)).unwrap();
+        assert_eq!(extra_tables, 0);
+        let applied: i64 = db.query_row("SELECT COUNT(*) FROM schema_migrations WHERE version=9", [], |row| row.get(0)).unwrap();
+        assert_eq!(applied, 0);
+    }
 }

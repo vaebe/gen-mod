@@ -46,7 +46,7 @@ pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name
     let directory = paths::project_dir(&app, &id)?;
     fs::create_dir(&directory).map_err(|e| e.to_string())?;
     let project = ModProject {
-        mod_id: id, name, revision: 0,
+        mod_id: id, name, revision: 0, archived: false,
         game_id, game_skill_name,
         draft_requirement: requirement, updated_at: now()?,
         development_status: DevelopmentStatus::Draft, latest_version_id: None,
@@ -82,11 +82,7 @@ pub fn get_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, mod_id:
     if let Ok(views) = crate::skills::registry::resolve(&app, &project.game_skill_name) {
         if let Some(id) = views.last().and_then(|v| v.definition.game_id.clone()) { project.game_id = id; }
     }
-    super::repository::update(&app,&mod_id,|current| {
-        current.game_id=project.game_id.clone();
-        for session in &mut current.sessions { if let Some(snapshot)=project.sessions.iter().find(|s|s.session_id==session.session_id) {session.read_only=snapshot.read_only;} }
-        Ok(())
-    })
+    Ok(project)
 }
 
 #[tauri::command]
@@ -99,6 +95,7 @@ pub fn rename_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, mod_
 #[tauri::command]
 pub fn save_mod_draft(app: tauri::AppHandle, state: tauri::State<StorageState>, mod_id: String, session_id: Option<String>, requirement: String, expected_requirement: Option<String>) -> Result<ModProject, String> {
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
+    crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
     let mut project = read_project(&app, &mod_id)?;
     if let Some(id) = session_id {
         if let Some(expected) = expected_requirement {

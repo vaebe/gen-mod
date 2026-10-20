@@ -1,8 +1,11 @@
+mod project_context;
+mod project_lifecycle;
 mod storage;
 mod pi;
 mod config;
 mod changes;
 mod files;
+mod source_files;
 mod skills;
 mod artifacts;
 mod install;
@@ -19,6 +22,16 @@ pub fn run() {
         .manage(install::installer::InstallState::default())
         .setup(|app| { storage::database::initialize(app.handle()).map_err(std::io::Error::other)?; Ok(()) })
         .invoke_handler(tauri::generate_handler![
+            project_lifecycle::set_mod_archived,project_lifecycle::list_archived_mods,project_lifecycle::delete_mod,
+            knowledge::get_long_term_memory, knowledge::list_long_term_memories,
+            knowledge::save_long_term_memory_entry, knowledge::set_long_term_memory_status,
+            source_files::pick_source_import_files, source_files::import_source_files,
+            source_files::move_source_file, source_files::create_source_directory,
+            assets::list_legacy_assets,assets::restore_legacy_asset,
+            game_inspection::inspect_supported_game, game_inspection::list_inspections, game_inspection::apply_inspection,
+            verification::list_verification, verification::edit_feedback_draft, verification::confirm_feedback_draft, verification::reject_feedback_draft,
+            artifacts::delivery_metadata::get_delivery_metadata,
+            project_context::get_project_context,
             storage::mods::create_mod, storage::mods::list_mods,
             storage::mods::get_mod, storage::mods::rename_mod,
             storage::mods::save_mod_draft,
@@ -49,3 +62,11 @@ pub fn run() {
             if matches!(event, tauri::RunEvent::Exit) { pi::bridge::shutdown(app); }
         });
 }
+
+mod verification;
+
+mod knowledge;
+
+mod game_inspection;
+
+mod assets;

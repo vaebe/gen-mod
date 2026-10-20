@@ -11,6 +11,12 @@ pub struct TaskContext {
     pub staging_id: String,
     pub staging_directory: String,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_snapshot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bootstrap_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bootstrap_sha256: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

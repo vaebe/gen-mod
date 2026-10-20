@@ -1,4 +1,5 @@
 pub mod bridge;
+pub mod task_tools;
 pub mod runtime;
 pub mod tasks;
 pub mod sessions;

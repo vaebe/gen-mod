@@ -1,9 +1,36 @@
 <script setup lang="ts">
+import type { DeliveryMetadata } from '@/contracts/delivery'
 import type { ArtifactVersion } from '@/contracts/mod'
+import { defineAsyncComponent, shallowRef, watch } from 'vue'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useVerification } from '@/features/verification/useVerification'
+import { nativeCall } from '@/services/native'
 
-defineProps<{ version: ArtifactVersion }>()
+const props = defineProps<{ version: ArtifactVersion, modId: string }>()
+defineEmits<{ repair: [record: import('@/contracts/verification').VerificationRecord] }>()
 const open = defineModel<boolean>('open', { default: false })
+const VerificationHistory = defineAsyncComponent(() => import('@/features/verification/VerificationHistory.vue'))
+const metadata = shallowRef<DeliveryMetadata>()
+const metadataError = shallowRef('')
+const verification = useVerification(() => props.modId, () => Number(open.value), () => props.version.versionId)
+watch(() => [props.modId, props.version.versionId], async () => {
+  const id = props.version.versionId
+  const modId = props.modId
+  metadata.value = undefined
+  metadataError.value = ''
+  try {
+    const value = await nativeCall<DeliveryMetadata[]>('get_delivery_metadata', { modId, versionId: id })
+    if (props.modId === modId && props.version.versionId === id) {
+      metadata.value = value[0]
+      metadataError.value = ''
+    }
+  }
+  catch (cause) {
+    if (props.modId === modId && props.version.versionId === id) {
+      metadataError.value = (cause as Error).message
+    }
+  }
+}, { immediate: true })
 function fileSize(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`
@@ -48,6 +75,27 @@ function fileSize(bytes: number): string {
             <span class="min-w-0 break-all font-mono select-text">{{ file.path }}</span><span class="shrink-0 text-muted-foreground" :title="`${file.size} B`">{{ fileSize(file.size) }}</span>
           </li>
         </ul>
+        <section class="mt-3 flex flex-col gap-2 text-xs">
+          <p v-if="metadataError" role="alert" class="text-destructive">
+            {{ metadataError }}
+          </p>
+          <p v-if="metadata?.checkReport">
+            内容规则 {{ metadata.checkReport.rulesVersion }}：候选字节与受限参考指纹；不展开嵌套压缩包。
+          </p>
+          <p v-for="finding in metadata?.checkReport?.findings" :key="finding.path + finding.code">
+            {{ finding.level }} · {{ finding.path }} · {{ finding.code }}
+          </p>
+          <p v-if="metadata?.checkReport && !metadata.checkReport.findings.length">
+            本次规则范围内未发现命中项。
+          </p>
+          <p v-if="!metadata?.cases.length">
+            此版本没有结构化验收步骤。
+          </p>
+          <p v-for="item in metadata?.cases" :key="item.id">
+            {{ item.precondition }} → {{ item.action }} → {{ item.expected }}；证据：{{ item.evidenceHint }}
+          </p>
+          <VerificationHistory :records="verification.data.value.records" @repair="$emit('repair', $event)" />
+        </section>
         <p class="mt-3 text-xs leading-5 text-muted-foreground">
           版本文件校验通过才可安装。交付成功不代表游戏运行效果已验证。
         </p>

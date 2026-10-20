@@ -8,6 +8,7 @@ export const useSessionStore = defineStore('session', () => {
   const selectedKey = shallowRef('')
   const fallback = runtime()
   let selection = 0
+  const projectGenerations = new Map<string, number>()
   function runtime() {
     return reactive(createSessionRuntime())
   }
@@ -17,6 +18,7 @@ export const useSessionStore = defineStore('session', () => {
   const selected = computed(() => runtimes.get(selectedKey.value) ?? fallback)
   async function open(modId: string, sessionId?: string, readOnly = false): Promise<void> {
     const epoch = ++selection
+    const projectGeneration = projectGenerations.get(modId) ?? 0
     const existing = sessionId ? runtimes.get(key(modId, sessionId)) : undefined
     if (existing && (existing.initialized)) {
       existing.readOnly = readOnly
@@ -31,7 +33,7 @@ export const useSessionStore = defineStore('session', () => {
       await value.open(modId, sessionId, readOnly)
     }
     finally {
-      if (value.sessionId) {
+      if (value.sessionId && projectGeneration === (projectGenerations.get(modId) ?? 0)) {
         const actual = key(modId, value.sessionId)
         runtimes.delete(pendingKey)
         runtimes.set(actual, value)
@@ -58,6 +60,20 @@ export const useSessionStore = defineStore('session', () => {
     runtimes.delete(id)
     if (selectedKey.value === id) {
       selectedKey.value = ''
+    }
+  }
+  function forgetProject(id: string): void {
+    projectGenerations.set(id, (projectGenerations.get(id) ?? 0) + 1)
+    ++selection
+    for (const [runtimeKey, value] of runtimes) {
+      if (runtimeKey.startsWith(`${id}/`)) {
+        value.client.select('', '', 0)
+        value.readOnly = true
+        runtimes.delete(runtimeKey)
+        if (selectedKey.value === runtimeKey) {
+          selectedKey.value = ''
+        }
+      }
     }
   }
   const client = computed({ get: () => selected.value.client, set: (value) => {
@@ -90,6 +106,8 @@ export const useSessionStore = defineStore('session', () => {
   const artifactRevision = computed({ get: () => selected.value.artifactRevision, set: (value) => {
     selected.value.artifactRevision = value
   } })
+  const verificationRevision = computed(() => selected.value.verificationRevision)
+  const memoryRevision = computed(() => selected.value.memoryRevision)
   const readOnly = computed({ get: () => selected.value.readOnly, set: (value) => {
     selected.value.readOnly = value
   } })
@@ -152,5 +170,5 @@ export const useSessionStore = defineStore('session', () => {
   const stopping = computed(() => selected.value.stopping)
   const steeringInputs = computed(() => selected.value.steeringInputs)
   const anyBusy = computed(() => [...runtimes.values()].some(value => value.busy))
-  return { attachments, canSteer, stopping, steeringInputs, runtimes, selectedKey, stateFor, isBusy, isRunning, anyBusy, open, close, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, modelState, modelChangeError, selectModel, refreshModel, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, send, abort, restart, flush, refreshStats, setThinking, compact }
+  return { forgetProject, attachments, canSteer, stopping, steeringInputs, runtimes, selectedKey, stateFor, isBusy, isRunning, anyBusy, open, close, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, modelState, modelChangeError, selectModel, refreshModel, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, send, abort, restart, flush, refreshStats, setThinking, compact }
 })

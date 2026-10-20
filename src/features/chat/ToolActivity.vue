@@ -2,10 +2,12 @@
 import type { ToolRun } from '@/contracts/session'
 import { ChevronDown, FileText, Folder, Search, Terminal } from '@lucide/vue'
 import { computed, shallowRef } from 'vue'
+import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
 const props = defineProps<{ tool: ToolRun }>()
+const router = useRouter()
 const open = shallowRef(false)
 const icon = computed(() => {
   const icons: Record<string, typeof Terminal> = { read: FileText, write: FileText, edit: FileText, grep: Search, find: Search, ls: Folder }
@@ -49,6 +51,15 @@ const output = computed(() => {
       </div>
     </CollapsibleContent>
   </Collapsible>
+  <div v-if="tool.status === 'succeeded' && tool.memorySave && tool.memorySave.outcome !== 'unchanged'" class="my-2 flex flex-wrap items-center gap-2 rounded-md border p-3 text-sm" role="status">
+    <span>{{ tool.memorySave.outcome === 'saved' ? `已保存长期记忆：${tool.memorySave.title}` : '已保留用户维护的记忆，AI 未覆盖。' }}</span>
+    <Button variant="outline" size="sm" @click="router.push({ path: '/settings', query: { tab: 'memory', memoryId: tool.memorySave.noteId } })">
+      查看、修改或删除
+    </Button>
+  </div>
+  <p v-if="tool.status === 'succeeded' && tool.projectMemoryUpdate?.outcome === 'saved'" role="status" class="my-2 text-sm text-muted-foreground">
+    项目记忆已更新，可在项目上下文的“记忆”中查看，在聊天中更正。
+  </p>
 </template>
 
 <style scoped>

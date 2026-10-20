@@ -8,12 +8,19 @@ export const useProjectsStore = defineStore('projects', () => {
   const projects = shallowRef<ModProject[]>([])
   const error = shallowRef('')
   const loading = shallowRef(false)
+  const notice = shallowRef('')
+  const invalidIds = new Set<string>()
+  let generation = 0
   async function refresh(): Promise<void> {
+    const epoch = ++generation
     loading.value = true
     error.value = ''
     try {
       const [values, failures, recoveries] = await Promise.all([modService.list(), nativeCall<{ modId: string, error: string }[]>('list_migration_errors'), nativeCall<{ modId: string, kind: string }[]>('list_recovery_issues')])
-      projects.value = values
+      if (epoch !== generation) {
+        return
+      }
+      projects.value = values.filter(project => !project.archived)
       if (recoveries.length) {
         error.value = recoveries.map(item => `文件操作需核对 ${item.modId}：${item.kind}`).join('；')
       }
@@ -21,11 +28,39 @@ export const useProjectsStore = defineStore('projects', () => {
         error.value = failures.map(item => `迁移失败 ${item.modId}：${item.error}`).join('；')
       }
     }
-    catch (cause) { error.value = (cause as Error).message }
-    finally { loading.value = false }
+    catch (cause) {
+      if (epoch === generation) {
+        error.value = (cause as Error).message
+      }
+    }
+    finally {
+      if (epoch === generation) {
+        loading.value = false
+      }
+    }
   }
   function upsert(project: ModProject): void {
-    projects.value = [project, ...projects.value.filter(item => item.modId !== project.modId)]
+    if (invalidIds.has(project.modId)) {
+      return
+    }
+    const previous = projects.value.find(item => item.modId === project.modId)
+    if (previous && previous.revision > project.revision) {
+      return
+    }
+    projects.value = project.archived ? projects.value.filter(item => item.modId !== project.modId) : [project, ...projects.value.filter(item => item.modId !== project.modId)]
   }
-  return { projects, error, loading, refresh, upsert }
+  function removeLocal(modId: string): void {
+    ++generation
+    invalidIds.add(modId)
+    projects.value = projects.value.filter(item => item.modId !== modId)
+    loading.value = false
+  }
+  function restoreLocal(project: ModProject): void {
+    invalidIds.delete(project.modId)
+    upsert(project)
+  }
+  function isRemoved(id: string): boolean {
+    return invalidIds.has(id)
+  }
+  return { projects, error, loading, notice, refresh, upsert, removeLocal, restoreLocal, isRemoved }
 })

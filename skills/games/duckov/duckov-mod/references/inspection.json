@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "kind": "references",
+      "paths": [
+        {
+          "relative": "UnityEngine.CoreModule.dll",
+          "fact": "referenceAssembly"
+        },
+        {
+          "relative": "UnityEngine.IMGUIModule.dll",
+          "fact": "referenceAssembly"
+        },
+        {
+          "relative": "TeamSoda.*.dll",
+          "fact": "referenceAssembly"
+        }
+      ]
+    },
+    {
+      "kind": "install",
+      "paths": [
+        {
+          "relative": "UnityPlayer.dll",
+          "fact": "engineMarker"
+        },
+        {
+          "relative": "Duckov_Data/Managed/UnityEngine.CoreModule.dll",
+          "fact": "referenceAssembly"
+        },
+        {
+          "relative": "Duckov_Data/Managed/UnityEngine.IMGUIModule.dll",
+          "fact": "referenceAssembly"
+        },
+        {
+          "relative": "Duckov_Data/Managed/TeamSoda.*.dll",
+          "fact": "referenceAssembly"
+        },
+        {
+          "relative": "Duckov_Data/Mods",
+          "fact": "loaderMarker"
+        }
+      ]
+    }
+  ]
+}

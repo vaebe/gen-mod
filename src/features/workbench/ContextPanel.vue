@@ -2,14 +2,17 @@
 import type { FileChange, FileDiff as FileDiffData } from '@/contracts/changes'
 import type { ModProject } from '@/contracts/mod'
 import type { VersionAction } from '@/features/mods/VersionActions.vue'
+import { ArrowUpRight, FileText, RefreshCw } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
-import { computed, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import ArtifactPanel from '@/features/mods/ArtifactPanel.vue'
 import InstallDialog from '@/features/mods/InstallDialog.vue'
 import VersionActions from '@/features/mods/VersionActions.vue'
@@ -21,6 +24,9 @@ import FileDiff from './FileDiff.vue'
 import SourceBrowser from './SourceBrowser.vue'
 
 const session = useSessionStore()
+const ProjectMemoryTab = defineAsyncComponent(() => import('./ProjectMemoryTab.vue'))
+const route = useRoute()
+const router = useRouter()
 const changes = shallowRef<FileChange[]>([])
 const operations = shallowRef<{ toolCallId: string, operation: string, path?: string, sourceRevision: number, fileChanges?: { path: string }[] }[]>([])
 const diff = shallowRef<FileDiffData>()
@@ -143,6 +149,16 @@ interface RuntimeLogEntry { timestamp: string, generation: number, taskId?: stri
 const runtimeLogs = shallowRef<RuntimeLogEntry[]>([])
 const logError = shallowRef('')
 const selectedTab = shallowRef('files')
+watch(() => route.query.context, (value) => {
+  if (value === 'memory') {
+    selectedTab.value = 'memory'
+  }
+}, { immediate: true })
+watch(selectedTab, (value) => {
+  if (value !== 'memory' && route.query.context === 'memory') {
+    void router.replace({ query: { ...route.query, context: undefined } })
+  }
+})
 const fileMode = shallowRef('all')
 let readingLogs = false
 /** 只刷新可见日志页；切换会话后丢弃旧请求，历史从磁盘恢复。 */
@@ -279,6 +295,8 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
           日志
         </TabsTrigger><TabsTrigger value="artifacts" class="flex-1">
           产物
+        </TabsTrigger><TabsTrigger value="memory" class="flex-1">
+          记忆
         </TabsTrigger>
       </TabsList>
       <TabsContent value="files" class="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
@@ -290,7 +308,7 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
             当前变更
           </ToggleGroupItem>
         </ToggleGroup>
-        <SourceBrowser v-show="fileMode === 'all'" :mod-id="session.modId" :revision="session.changeRevision" :active="selectedTab === 'files' && fileMode === 'all'" />
+        <SourceBrowser v-show="fileMode === 'all'" :mod-id="session.modId" :revision="session.changeRevision" :read-only="artifactProject?.archived" :active="selectedTab === 'files' && fileMode === 'all'" />
         <ScrollArea v-if="fileMode === 'changes'" class="min-h-0 flex-1">
           <div v-if="session.task" class="space-y-2 border-b p-3 text-xs">
             <p class="font-medium">
@@ -311,17 +329,39 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
           </p>
         </ScrollArea>
       </TabsContent>
-      <ScrollArea v-show="selectedTab === 'logs'" class="min-h-0 flex-1">
-        <TabsContent value="logs">
-          <div class="flex items-center gap-2 p-3">
-            <Button v-if="session.task" size="sm" variant="outline" @click="openLogs">
-              打开任务全文日志
-            </Button><Button size="sm" variant="ghost" @click="refreshLogs">
-              刷新
-            </Button>
-          </div><p class="px-3 pb-3 text-[11px] text-muted-foreground">
-            会话运行日志 · 最近 200 条 · 每 3 秒刷新
-          </p><p v-if="logError" role="alert" class="p-3 text-xs text-destructive">
+      <TabsContent value="logs" class="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+        <div class="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
+          <div class="flex min-w-0 flex-col gap-1">
+            <p class="text-sm font-medium">
+              会话日志
+            </p>
+            <p class="text-xs text-muted-foreground">
+              最近 200 条 · 每 3 秒自动刷新
+            </p>
+          </div>
+          <TooltipProvider :delay-duration="150">
+            <div class="flex shrink-0 items-center gap-1">
+              <Tooltip v-if="session.task">
+                <TooltipTrigger as-child>
+                  <Button size="icon-sm" variant="ghost" aria-label="打开任务完整日志" @click="openLogs">
+                    <FileText aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>打开任务完整日志</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <Button size="icon-sm" variant="ghost" aria-label="刷新日志" @click="refreshLogs">
+                    <RefreshCw aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>刷新日志</TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
+        </div>
+        <ScrollArea class="min-h-0 flex-1">
+          <p v-if="logError" role="alert" class="p-3 text-xs text-destructive">
             {{ logError }}
           </p><p v-if="!runtimeLogs.length" class="p-3 text-xs text-muted-foreground">
             暂无已保存的运行日志。更新前的运行摘要不会补录，既有命令日志仍可通过上方按钮查看。
@@ -334,17 +374,30 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
               当前连接诊断
             </p><pre v-for="(line, index) in session.diagnostics" :key="index" class="border-b px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre-wrap break-all">{{ line }}</pre>
           </template>
-        </TabsContent>
-      </ScrollArea>
+        </ScrollArea>
+      </TabsContent>
       <TabsContent value="artifacts" class="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
-        <div v-if="session.modId" class="shrink-0 p-3">
-          <Button as-child class="w-full" size="sm" variant="outline">
-            <RouterLink :to="`/mods/${session.modId}/versions`">
-              版本与安装管理
-            </RouterLink>
-          </Button>
+        <div v-if="session.modId" class="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
+          <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <p class="text-sm font-medium">
+              交付版本
+            </p>
+            <span class="text-xs text-muted-foreground">共 {{ artifactProject?.versions.length ?? 0 }} 个版本</span>
+          </div>
+          <TooltipProvider :delay-duration="150">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button as-child size="icon-sm" variant="ghost" aria-label="版本与安装管理">
+                  <RouterLink :to="`/mods/${session.modId}/versions`">
+                    <ArrowUpRight aria-hidden="true" />
+                  </RouterLink>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>版本与安装管理</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
-        <div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="产物版本列表">
+        <ScrollArea class="min-h-0 flex-1" role="region" aria-label="产物版本列表">
           <p v-if="!artifactProject?.versions.length" class="p-3 text-xs leading-6 text-muted-foreground">
             尚无成功交付版本。
           </p>
@@ -354,10 +407,10 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
           <p v-if="artifactNotice" role="status" class="p-3 text-xs">
             {{ artifactNotice }}
           </p>
-          <div v-for="version in [...(artifactProject?.versions ?? [])].reverse()" :key="version.versionId" class="flex flex-col gap-2 border-b p-3 text-sm">
+          <div v-for="version in [...(artifactProject?.versions ?? [])].reverse()" :key="version.versionId" class="flex flex-col gap-1 border-b px-3 py-2.5 text-sm">
             <div class="flex items-center justify-between gap-2">
-              <div class="flex min-w-0 flex-wrap items-start gap-1.5">
-                <span class="font-mono" :title="version.versionId">{{ version.versionId.slice(0, 8) }}</span>
+              <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span class="font-mono font-medium" :title="version.versionId">{{ version.versionId.slice(0, 8) }}</span>
                 <Badge v-if="artifactProject?.latestVersionId === version.versionId" variant="secondary" class="shrink-0 border-blue-200 bg-blue-100 px-1.5 py-0 text-[10px] leading-4 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-950">
                   最新
                 </Badge>
@@ -365,19 +418,20 @@ watch(() => [session.task?.taskId, session.changeRevision], async (_value, _old,
                   已安装
                 </Badge>
               </div>
-              <VersionActions :version-id="version.versionId" :busy="artifactActionsBusy" @action="artifactAction" />
+              <VersionActions :version-id="version.versionId" :busy="artifactActionsBusy" :read-only="artifactProject?.archived" @action="artifactAction" />
             </div>
-            <p class="text-muted-foreground">
-              {{ version.files.length }} 个文件
-            </p>
-            <p class="text-muted-foreground">
-              {{ new Date(version.createdAt).toLocaleString() }}
+            <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <span>{{ version.files.length }} 个文件</span>
+              <time :datetime="version.createdAt">{{ new Date(version.createdAt).toLocaleString() }}</time>
             </p>
           </div>
-        </div>
+        </ScrollArea>
+      </TabsContent>
+      <TabsContent value="memory" class="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+        <ProjectMemoryTab :mod-id="session.modId" :revision="session.memoryRevision" :active="selectedTab === 'memory'" :read-only="session.readOnly" />
       </TabsContent>
     </Tabs>
-    <ArtifactPanel v-if="selectedArtifact" v-model:open="artifactDetailsOpen" :version="selectedArtifact" />
+    <ArtifactPanel v-if="selectedArtifact" v-model:open="artifactDetailsOpen" :version="selectedArtifact" :mod-id="session.modId" @repair="record => { artifactDetailsOpen = false; $router.push({ path: `/mods/${record.modId}/chat`, query: { repair: record.recordId } }) }" />
     <InstallDialog v-if="selectedArtifact && artifactProject" v-model:open="artifactInstalling" :mod-id="artifactProject.modId" :version-id="selectedArtifact.versionId" :previous-target="previousTarget" @target-selected="rememberTarget" @installed="refreshArtifacts" />
     <Dialog :open="artifactDeleting" @update:open="value => !artifactBusy && (artifactDeleting = value)">
       <DialogContent @interact-outside="artifactBusy && $event.preventDefault()" @escape-key-down="artifactBusy && $event.preventDefault()">

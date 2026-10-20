@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { SessionAction } from './SessionManageDialog.vue'
+import type { ModProject } from '@/contracts/mod'
 import { Folder, FolderOpen, MoreVertical, Pencil, Settings, Sparkles, Trash2 } from '@lucide/vue'
-import { shallowRef } from 'vue'
+import { defineAsyncComponent, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -16,6 +17,8 @@ const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const action = shallowRef<SessionAction>()
+const removing = shallowRef<ModProject>()
+const RemoveProjectDialog = defineAsyncComponent(() => import('../mods/RemoveProjectDialog.vue'))
 const collapsedProjects = shallowRef(new Set<string>())
 /** 分组展开状态只影响列表展示，不切换或停止当前会话。 */
 function toggleProject(modId: string): void {
@@ -71,9 +74,22 @@ async function createSession(modId: string): Promise<void> {
             <SidebarMenuButton :is-active="route.params.modId === project.modId" :aria-expanded="!collapsedProjects.has(project.modId)" :aria-controls="`project-sessions-${project.modId}`" :title="`${collapsedProjects.has(project.modId) ? '展开' : '收起'}${project.name}`" @click="toggleProject(project.modId)">
               <Folder v-if="collapsedProjects.has(project.modId)" /><FolderOpen v-else /><span>{{ project.name }}</span>
             </SidebarMenuButton>
-            <SidebarMenuAction :aria-label="`为${project.name}新增会话`" title="新增会话" class="opacity-0 peer-hover/menu-button:opacity-100 peer-focus-visible/menu-button:opacity-100 hover:opacity-100 focus-visible:opacity-100" @click.stop="createSession(project.modId)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4H8a4 4 0 0 0-4 4v8a4 4 0 0 0 4 4h8a4 4 0 0 0 4-4v-2" /><path d="m15 4 5 5M10 14l4-1L21 6a2.12 2.12 0 0 0-3-3l-7 7-1 4Z" /></svg>
-            </SidebarMenuAction>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <SidebarMenuAction :aria-label="`${project.name}的操作`" title="项目操作">
+                  <MoreVertical class="size-4" />
+                </SidebarMenuAction>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem @select="createSession(project.modId)">
+                    新增会话
+                  </DropdownMenuItem><DropdownMenuItem @select="removing = project">
+                    移除项目…
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <SidebarMenuSub v-show="project.sessions.length && !collapsedProjects.has(project.modId)" :id="`project-sessions-${project.modId}`" class="mx-0 w-full translate-x-0 border-l-0 px-0">
               <SidebarMenuSubItem v-for="item in project.sessions" :key="item.sessionId" class="group/session relative">
                 <!-- 右侧操作区固定占位，标题只按实际剩余宽度截断。 -->
@@ -127,4 +143,5 @@ async function createSession(modId: string): Promise<void> {
     </SidebarFooter>
   </Sidebar>
   <SessionManageDialog v-model="action" />
+  <RemoveProjectDialog v-model="removing" />
 </template>

@@ -20,10 +20,34 @@
 
 编译期依赖来自参考目录；运行期依赖来自游戏或明确的前置 Mod。新增前置应说明来源、版本、加载方式与分发权限，确认后再引入。不要把缺失的游戏 API 问题转化成安装最新 NuGet 包，也不要创建假的同名程序集骗过编译。
 
+## 构建与交付命令
+
+交付可安装版本时，通过 `run_command` 顺序调用本能力原始 `prepare.ps1`、`build.ps1`、`package.ps1`。必需编译记录必须来自原始 `build.ps1` 绝对路径。cwd 为当前 source；路径分别传参：
+
+```text
+program: powershell.exe
+args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+       "<skill>/scripts/prepare.ps1", "-ReferenceDirectory", "<referenceDirectory>"]
+
+program: powershell.exe
+args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+       "<skill>/scripts/build.ps1", "-ProjectPath", "<source>/ExampleMod.csproj",
+       "-ReferenceDirectory", "<referenceDirectory>",
+       "-OutputDirectory", "<source>/.delivery/<taskId>/build"]
+
+program: powershell.exe
+args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+       "<skill>/scripts/package.ps1", "-ModName", "<ModName>",
+       "-BuildDirectory", "<source>/.delivery/<taskId>/build",
+       "-SourceDirectory", "<source>", "-PackageDirectory", "<source>/.delivery/<taskId>/package"]
+```
+
+输出目录必须全新。更新工程 README 后收集实际 package 文件，调用 `prepare_delivery`，target 为 `<ModName>/<文件名>`，targetDirectoryHint 为 `Duckov_Data/Mods`，commandIds 包含本任务成功 build/package 的 ID。通用字段与证据规则见 mod-workflow 能力的 references/delivery.md。
+
 ## 现有脚本的能力边界
 
 - prepare.ps1 只检查最小文件组与 dotnet 命令存在，不能证明 SDK 版本、全部类型或功能所需引用完整。
 - build.ps1 调用原始 prepare.ps1 后执行 dotnet build；build 内部固定调用 powershell.exe，按当前脚本实际行为记录错误，不另造包装命令冒充必需脚本记录。
-- package.ps1 只复制 `<ModName>.dll`、info.ini、README.md、preview.png；没有 preview.png 时生成中性预览图。不会自动复制其他 DLL、AssetBundle、配置或子目录。
+- package.ps1 只复制 `<ModName>.dll`、info.ini、README.md、preview.png；没有 preview.png 时生成中性预览图。不会自动复制其他 DLL、AssetBundle、配置或子目录；需要额外文件时使用可选 ResourceManifest 显式列出，格式与约束见 [资源交付](ui-assets.md#显式图片资源清单)。
 - 不附带游戏、Unity、UniTask 参考程序集。第三方 Mod 运行库是否由前置提供须单独确认，不能一律按游戏 DLL 处理。
 - 若需求需要额外交付文件，先核对项目当前交付工具、安装映射与允许文件集。扩展脚本或依赖范围未获授权时，保留源码并明确交付缺项，不登记看似完整但不可用的包。

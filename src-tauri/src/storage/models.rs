@@ -82,8 +82,10 @@ pub enum DevelopmentStatus { Draft, Generated, Running, Failed, Ready }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModProject {
-    #[serde(default, skip)]
+    #[serde(default)]
     pub revision: i64,
+    #[serde(default)]
+    pub archived: bool,
     pub mod_id: String,
     pub name: String,
     pub game_id: String,

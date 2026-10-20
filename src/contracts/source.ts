@@ -15,3 +15,16 @@ export interface SourcePreview {
   previewLimit: number
   unavailableReason: 'tooLarge' | 'binary' | 'encoding' | null
 }
+
+export interface SourceImportItem { sourcePath: string, targetName: string }
+export interface SourceMutationItem {
+  source: string
+  target: string
+  status: 'imported' | 'moved' | 'conflict' | 'failed'
+  message?: string | null
+}
+export interface SourceMutationResult {
+  operationId: string
+  sourceRevision: number
+  items: SourceMutationItem[]
+}

@@ -2,10 +2,11 @@
 import type { VersionAction } from './VersionList.vue'
 import type { ModProject } from '@/contracts/mod'
 import { computed, shallowRef, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useVerification } from '@/features/verification/useVerification'
 import { displayPath } from '@/lib/displayPath'
 import { modService, nativeCall } from '@/services/native'
 import { useProjectsStore } from '@/stores/projects'
@@ -14,6 +15,7 @@ import ArtifactPanel from './ArtifactPanel.vue'
 import InstallDialog from './InstallDialog.vue'
 import VersionList from './VersionList.vue'
 
+const router = useRouter()
 const route = useRoute()
 const project = shallowRef<ModProject>()
 const selectedId = shallowRef('')
@@ -25,6 +27,11 @@ const installing = shallowRef(false)
 const deleting = shallowRef(false)
 const detailsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
+async function continueRepair(record: import('@/contracts/verification').VerificationRecord): Promise<void> {
+  detailsOpen.value = false
+  await router.push({ path: `/mods/${record.modId}/chat`, query: { repair: record.recordId } })
+}
+
 /** 只标记仍在目标状态中已知的当前版本，历史安装成功不等于当前安装。 */
 const installedIds = computed(() => project.value?.installedTargets.filter(target => target.state === 'known' && target.versionId).map(target => target.versionId!) ?? [])
 const installationSummary = computed(() => {
@@ -45,6 +52,7 @@ const previousTarget = computed(() => {
 })
 const projects = useProjectsStore()
 const session = useSessionStore()
+const verification = useVerification(() => project.value?.modId, () => session.verificationRevision)
 let generation = 0
 async function refresh(): Promise<void> {
   const id = String(route.params.modId)
@@ -206,8 +214,8 @@ async function deleteVersion(): Promise<void> {
           安装记录（{{ project.installations.length }}）
         </Button>
       </div>
-      <VersionList :versions="project.versions" :latest="project.latestVersionId" :installed="installedIds" :busy="busy || installing || deleting" @action="versionAction" />
-      <ArtifactPanel v-if="selected" v-model:open="detailsOpen" :version="selected" />
+      <VersionList :verification-records="verification.data.value.records" :versions="project.versions" :latest="project.latestVersionId" :installed="installedIds" :busy="busy || installing || deleting" :read-only="project.archived" @action="versionAction" />
+      <ArtifactPanel v-if="selected" v-model:open="detailsOpen" :version="selected" :mod-id="project.modId" @repair="continueRepair" />
       <InstallDialog v-if="selected" v-model:open="installing" :mod-id="project.modId" :version-id="selected.versionId" :previous-target="previousTarget" @target-selected="rememberTarget" @installed="refresh" />
       <Dialog v-model:open="historyOpen">
         <DialogContent class="flex max-h-[calc(100dvh-3rem)] flex-col gap-3 overflow-hidden p-5 sm:max-w-2xl">

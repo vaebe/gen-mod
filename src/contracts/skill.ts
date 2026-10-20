@@ -15,6 +15,7 @@ export interface SkillDefinition {
   path: string
   excludePaths: string[]
   requiredCommandScripts?: string[]
+  inspectionFile?: string
 }
 export interface SkillView extends SkillDefinition {
   source: 'builtin' | 'user'

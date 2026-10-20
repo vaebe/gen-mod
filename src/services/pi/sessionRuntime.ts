@@ -26,6 +26,8 @@ export function createSessionRuntime() {
   const uiRequest = shallowRef<PiRecord>()
   const changeRevision = shallowRef(0)
   const artifactRevision = shallowRef(0)
+  const verificationRevision = shallowRef(0)
+  const memoryRevision = shallowRef(0)
   const submitting = shallowRef(false)
   const switching = shallowRef(false)
   const compacting = shallowRef(false)
@@ -71,6 +73,12 @@ export function createSessionRuntime() {
   }
   function receive(event: PiEnvelope): void {
     const record = event.record
+    if (event.kind === 'task' && record.type === 'project_memory_updated' && !readOnly.value && event.modId === modId.value) {
+      memoryRevision.value += 1
+    }
+    if (event.kind === 'task' && record.type === 'feedback_draft_updated') {
+      verificationRevision.value += 1
+    }
     if (event.kind === 'task' && record.type === 'steering_confirmed') {
       void refreshInputs().catch((cause) => {
         error.value = cause.message
@@ -294,6 +302,10 @@ export function createSessionRuntime() {
       modelChangeError.value = ''
       startedAt.value = undefined
       endedAt.value = undefined
+      if (historyOnly && !id) {
+        initialized.value = true
+        return
+      }
       const targetId = id ?? await nativeCall<string>('create_mod_session', { modId: projectId })
       sessionId.value = targetId
       const [history, metadata] = await Promise.all([
@@ -556,5 +568,5 @@ export function createSessionRuntime() {
     flush()
     await open(project, id)
   }
-  return { initialized, attachments, steeringInputs, stopping, canSteer, steeringSubmitting, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, changingModel, modelState, modelChangeError, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, open, send, abort, restart, flush, refreshStats, refreshModel, selectModel, setThinking, compact, close }
+  return { initialized, attachments, steeringInputs, stopping, canSteer, steeringSubmitting, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, changingModel, modelState, modelChangeError, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, open, send, abort, restart, flush, refreshStats, refreshModel, selectModel, setThinking, compact, close }
 }

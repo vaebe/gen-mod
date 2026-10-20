@@ -13,4 +13,11 @@ impl<T: Default> Registry<T> {
     pub fn all(&self) -> Result<Vec<Arc<Mutex<T>>>, String> {
         Ok(self.0.lock().map_err(|_| "会话注册表锁异常")?.values().cloned().collect())
     }
+    pub fn for_project(&self, mod_id: &str) -> Result<Vec<Arc<Mutex<T>>>,String> {
+        Ok(self.0.lock().map_err(|_| "会话注册表锁异常")?.iter().filter(|((id,_),_)|id==mod_id).map(|(_,slot)|slot.clone()).collect())
+    }
+    pub fn remove_project(&self, mod_id: &str) -> Result<(),String> {
+        self.0.lock().map_err(|_| "会话注册表锁异常")?.retain(|(id,_),_|id!=mod_id);
+        Ok(())
+    }
 }

@@ -1,15 +1,23 @@
 <script setup lang="ts">
 import type { ChatMessage, ToolRun } from '@/contracts/session'
 import type { TaskRecord } from '@/contracts/task'
+import type { FeedbackDraft, VerificationRecord } from '@/contracts/verification'
 import { Check, Copy } from '@lucide/vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import ChatImage from './ChatImage.vue'
 import { conversationRounds } from './conversationRounds'
 import MessageParts from './MessageParts.vue'
 import RoundActivity from './RoundActivity.vue'
 
-const props = defineProps<{ messages: ChatMessage[], tools: Record<string, ToolRun>, modId: string, tasks: TaskRecord[], working: boolean, startedAt?: number, endedAt?: number, activity: string, lastActivityAt: number }>()
+const props = defineProps<{ messages: ChatMessage[], tools: Record<string, ToolRun>, modId: string, tasks: TaskRecord[], working: boolean, startedAt?: number, endedAt?: number, activity: string, lastActivityAt: number, feedbackDrafts?: FeedbackDraft[], verificationRecords?: VerificationRecord[] }>()
+defineEmits<{ feedbackChanged: [] }>()
+const VerificationCard = defineAsyncComponent(() => import('@/features/verification/VerificationCard.vue'))
+const roundEntryIds = computed(() => new Set(props.messages.flatMap(message => message.entryId ? [message.entryId] : [])))
+const unanchoredDrafts = computed(() => props.feedbackDrafts?.filter(draft => !draft.payload.sourceRefs.some(ref => roundEntryIds.value.has(ref.entryId))) ?? [])
+function feedbackForEntries(ids: (string | undefined)[]): FeedbackDraft[] {
+  return props.feedbackDrafts?.filter(draft => draft.payload.sourceRefs.some(ref => ids.includes(ref.entryId))) ?? []
+}
 const rounds = computed(() => conversationRounds(props.messages, props.tasks, props.working, props.startedAt, props.endedAt))
 const scroll = useTemplateRef<HTMLElement>('scroll')
 const content = useTemplateRef<HTMLElement>('content')
@@ -115,6 +123,7 @@ watch(() => [props.messages, props.working], async () => {
             {{ input.inputStatus === 'confirmed' ? '补充要求已进入会话' : input.inputStatus === 'handled' ? '补充要求由扩展接收' : input.inputStatus === 'unknown' ? '状态未确认，请检查历史' : ['failed', 'rejected'].includes(input.inputStatus ?? '') ? '补充要求提交失败' : '补充要求已提交，等待处理' }}
           </p>
         </article>
+        <VerificationCard v-for="draft in feedbackForEntries([round.user?.entryId, ...(round.supplements ?? []).map(input => input.entryId)])" :key="draft.draftId" :draft="draft" :records="verificationRecords?.filter(record => record.versionId === draft.payload.versionId)" @changed="$emit('feedbackChanged')" />
         <RoundActivity :round="round" :tools="tools" :mod-id="modId" :activity="activity" :last-activity-at="lastActivityAt" />
         <p v-if="!round.running && round.status === 'cancelled' && !round.process.some(message => message.stopReason === 'aborted')" class="text-xs text-muted-foreground">
           已手动停止
@@ -137,6 +146,7 @@ watch(() => [props.messages, props.working], async () => {
           </p>
         </article>
       </section>
+      <VerificationCard v-for="draft in unanchoredDrafts" :key="draft.draftId" :draft="draft" :records="verificationRecords?.filter(record => record.versionId === draft.payload.versionId)" @changed="$emit('feedbackChanged')" />
     </div>
   </div>
 </template>

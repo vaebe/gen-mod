@@ -1,7 +1,13 @@
+import { registerMemoryBootstrap } from "./memory.js";
+import { registerInspectionTools } from "./inspection.js";
+import { registerKnowledgeTools } from "./knowledge.js";
+import { registerVerificationTools, verificationCaseSchema } from "./verification.js";
+import { registerProjectContextTools } from "./project-context.js";
 import { registerFileTools, withLease } from "./workspace.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { runCommand, context, commandEnvironment } from "./commands.js";
+import { checkDelivery } from "./delivery-check.js";
 import { prepareDelivery } from "./delivery.js";
 import { lstat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -10,6 +16,10 @@ import { contained } from "./commands.js";
 /** 应用唯一显式加载的 extension：命令执行与文件交付，无游戏分支。 */
 export default function modTools(pi: ExtensionAPI): void {
   registerFileTools(pi);
+  registerProjectContextTools(pi);
+  registerVerificationTools(pi);
+  registerKnowledgeTools(pi);
+  registerInspectionTools(pi);
   // taskId 只隔离本轮命令与交付；同一个 source 的开发成果必须持续复用。
   pi.on("before_agent_start", async (event) => {
     const available = await commandEnvironment();
@@ -43,9 +53,10 @@ export default function modTools(pi: ExtensionAPI): void {
   });
   pi.registerTool({
     name: "prepare_delivery", label: "准备交付", description: "复制当前任务文件并打包 ZIP；原生校验成功后才登记不可变版本。taskId/stagingId 由应用绑定。", executionMode: "sequential",
-    parameters: Type.Object({ files: Type.Array(Type.Object({ source: Type.String(), target: Type.String() }), { minItems: 1 }), commandIds: Type.Array(Type.String(), { minItems: 1 }), targetDirectoryHint: Type.String() }),
+    parameters: Type.Object({ files: Type.Array(Type.Object({ source: Type.String(), target: Type.String() }), { minItems: 1 }), commandIds: Type.Array(Type.String(), { minItems: 1 }), targetDirectoryHint: Type.String(), verificationCases: Type.Optional(Type.Array(verificationCaseSchema)) }),
     async execute(id, parameters, signal, _onUpdate, ctx) {
       return withLease(ctx,id,"prepare_delivery",undefined,signal,async lease => {
+      await checkDelivery(ctx, id, parameters);
       const delivery = { ...await prepareDelivery(id, parameters, signal,lease), leaseId: lease.leaseId, sourceRevision: lease.sourceRevision };
       const reply = await ctx.ui.input("gen-mod:register-delivery", JSON.stringify({ toolCallId: id, delivery }), { timeout: 30_000 });
       if (!reply) { throw new Error("未取得原生版本登记结果；不能声称交付成功，请查看运行日志。ZIP 暂存在本轮 staging 目录。"); }
@@ -56,4 +67,5 @@ export default function modTools(pi: ExtensionAPI): void {
       });
     },
   });
+  registerMemoryBootstrap(pi);
 }

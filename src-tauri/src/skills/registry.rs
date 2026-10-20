@@ -68,6 +68,12 @@ fn validate(definition: &SkillDefinition, root: &Path) -> Result<(String, Vec<St
         crate::changes::relative_path(script)?;
         if !files.contains_key(script) { return Err(format!("必需命令脚本不存在：{script}")); }
     }
+    if let Some(file)=&definition.inspection_file {
+        crate::changes::relative_path(file)?;
+        let path=files.get(file).ok_or("调查规则文件不存在")?;
+        let rule:crate::game_inspection::models::InspectionRule=serde_json::from_slice(&fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        crate::game_inspection::scanner::validate_rules(&rule)?;
+    }
     let entry = files.get("SKILL.md").ok_or("能力目录缺少 SKILL.md")?;
     let (name, description) = frontmatter(&fs::read_to_string(entry).map_err(|e| e.to_string())?)?;
     if name != definition.name || description != definition.description.trim() { return Err("能力清单与 SKILL.md 的 name/description 不一致".into()); }
@@ -75,7 +81,7 @@ fn validate(definition: &SkillDefinition, root: &Path) -> Result<(String, Vec<St
     hash.update(serde_json::to_vec(&serde_json::json!({
         "category": definition.category, "gameId": definition.game_id, "version": definition.version,
         "dependencies": definition.dependencies, "excludePaths": definition.exclude_paths,
-        "requiredCommandScripts": definition.required_command_scripts
+        "requiredCommandScripts": definition.required_command_scripts, "inspectionFile":definition.inspection_file
     })).map_err(|e| e.to_string())?);
     let mut scripts = vec![];
     for (relative, path) in &files {
@@ -225,4 +231,13 @@ pub fn import_skill(app: tauri::AppHandle, state: tauri::State<mods::StorageStat
     }
     Ok(())
     })
+}
+
+#[cfg(test)]mod tests{
+ use super::*;
+ #[test]fn builtin_resources_match_registry_and_include_inspection_rules(){
+ let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills");
+ let definitions:Vec<SkillDefinition>=serde_json::from_slice(&fs::read(root.join("registry.json")).unwrap()).unwrap();
+ for definition in definitions {let(hash,_)=validate(&definition,&root.join(&definition.path)).unwrap();assert_eq!(hash.len(),64);}
+ }
 }

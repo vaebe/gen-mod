@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { SourcePreview } from '@/contracts/source'
-import { FileCode, LoaderCircle } from '@lucide/vue'
+import { Copy, FileCode, FolderSearch, LoaderCircle } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { nativeCall } from '@/services/native'
 import { highlightSource } from './sourceHighlight'
 
@@ -19,6 +20,10 @@ const imageDimensions = shallowRef('')
 const lines = computed(() => props.preview?.text?.split(/\r\n|\n|\r/u) ?? [])
 const lineNumbers = computed(() => lines.value.map((_, index) => index + 1).join('\n'))
 const displayText = computed(() => lines.value.join('\n'))
+const previewActions = computed(() => [
+  { kind: 'copy', label: '复制内容', icon: Copy, disabled: props.preview?.text == null || props.loading },
+  { kind: 'reveal', label: '在文件管理器中定位', icon: FolderSearch, disabled: props.loading || !!props.error },
+] as const)
 const unavailableMessage = computed(() => {
   if (props.preview?.unavailableReason === 'tooLarge') {
     return `文件超过 ${props.preview.previewLimit / 1024 / 1024} MiB，无法预览。`
@@ -139,12 +144,21 @@ async function action(kind: 'copy' | 'reveal'): Promise<void> {
       <Button v-if="imageUrl && !imageError" size="sm" variant="ghost" class="h-7 px-2 text-xs" @click="originalSize = !originalSize">
         {{ originalSize ? '适应面板' : '原尺寸' }}
       </Button>
-      <Button size="sm" variant="ghost" class="h-7 px-2 text-xs" :disabled="preview?.text == null || loading" @click="action('copy')">
-        复制
-      </Button>
-      <Button size="sm" variant="ghost" class="h-7 px-2 text-xs" :disabled="loading || !!error" @click="action('reveal')">
-        定位
-      </Button>
+      <TooltipProvider :delay-duration="150">
+        <Tooltip v-for="item in previewActions" :key="item.kind">
+          <TooltipTrigger as-child>
+            <span v-if="item.disabled" tabindex="0" :aria-label="item.label" class="inline-flex">
+              <Button size="icon-sm" variant="ghost" disabled :aria-label="item.label">
+                <component :is="item.icon" aria-hidden="true" />
+              </Button>
+            </span>
+            <Button v-else size="icon-sm" variant="ghost" :aria-label="item.label" @click="action(item.kind)">
+              <component :is="item.icon" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ item.label }}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
     <Empty v-if="!path">
       <EmptyHeader>

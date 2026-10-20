@@ -17,6 +17,7 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
   const loading = shallowRef<Record<string, boolean>>({})
   const errors = shallowRef<Record<string, string>>({})
   const selected = shallowRef('')
+  const directory = shallowRef('')
   const preview = shallowRef<SourcePreview>()
   const previewLoading = shallowRef(false)
   const previewError = shallowRef('')
@@ -70,6 +71,7 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
     const current = ++selectionGeneration
     const modId = props.modId
     selected.value = path
+    directory.value = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
     preview.value = undefined
     previewError.value = ''
     previewLoading.value = !!modId && !!path
@@ -92,6 +94,29 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
         previewLoading.value = false
       }
     }
+  }
+
+  function selectDirectory(path: string): void {
+    directory.value = path
+    selected.value = ''
+    preview.value = undefined
+    previewError.value = ''
+    previewLoading.value = false
+    selectionGeneration++
+  }
+
+  async function reveal(path: string): Promise<void> {
+    const current = generation
+    const parts = path.split('/').slice(0, -1)
+    for (let index = 0; index < parts.length; index++) {
+      const parent = parts.slice(0, index + 1).join('/')
+      expanded.value = new Set([...expanded.value, parent])
+      await loadDirectory(parent)
+      if (current !== generation) {
+        return
+      }
+    }
+    await select(path)
   }
 
   /** 文件夹首次展开时读取子项；收起后保留本次浏览缓存。 */
@@ -150,6 +175,7 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
     if (modId !== previous?.[0]) {
       expanded.value = new Set()
       selected.value = ''
+      directory.value = ''
       preview.value = undefined
       previewError.value = ''
       previewLoading.value = false
@@ -169,5 +195,5 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
     selectionGeneration += 1
   })
 
-  return { rows, selected, preview, previewLoading, previewError, rootLoading: computed(() => !!loading.value['']), rootError: computed(() => errors.value[''] ?? ''), toggle, select, refresh, loadDirectory }
+  return { rows, selected, directory, preview, previewLoading, previewError, rootLoading: computed(() => !!loading.value['']), rootError: computed(() => errors.value[''] ?? ''), toggle, select, selectDirectory, reveal, refresh, loadDirectory }
 }

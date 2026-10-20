@@ -22,6 +22,7 @@ struct Process {
     compacting: bool,
     prompt_id: Option<String>,
     tool_inputs: std::collections::BTreeMap<String, Value>,
+    tool_names: std::collections::BTreeMap<String, String>,
     app: tauri::AppHandle,
     pending_title: Option<String>,
     waiting_leases: Vec<String>,
@@ -32,16 +33,65 @@ struct Process {
     confirming_input: Option<String>,
     stopping: bool,
     model: crate::config::ModelDefinition,
+    known_secrets: Vec<String>,
+    tool_cancellations: std::collections::BTreeMap<String, Arc<std::sync::atomic::AtomicBool>>,
+    bootstrap: Option<std::sync::mpsc::Receiver<Result<MemoryBootstrapAck,String>>>,
+    preparation_guard: Option<PreparationGuard>,
+    preparation_cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 #[derive(Default)]
 struct Inner { generation: u64, process: Option<Process> }
+type Preparations=Arc<Mutex<std::collections::BTreeMap<(String,String),Preparation>>>;
+struct Preparation {generation:u64,cancelled:Arc<std::sync::atomic::AtomicBool>,channel:Channel<Envelope>}
 #[derive(Default, Clone)]
-pub struct PiState(Arc<super::manager::Registry<Inner>>);
+pub struct PiState(Arc<super::manager::Registry<Inner>>,Preparations);
+struct PreparationGuard {registry:Preparations,key:(String,String)}
+impl Drop for PreparationGuard {fn drop(&mut self){if let Ok(mut values)=self.registry.lock(){values.remove(&self.key);}}}
 #[derive(Clone)]
 struct SlotState(Arc<Mutex<Inner>>);
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Identity { mod_id: String, session_id: String, generation: u64 }
+
+#[derive(serde::Deserialize)]
+#[serde(tag="status",rename_all="snake_case",rename_all_fields="camelCase",deny_unknown_fields)]
+enum MemoryBootstrapAck {
+    Ready{mod_id:String,session_id:String,task_id:String,generation:u64,snapshot_id:String,sha256:String},
+    Error{mod_id:String,session_id:String,task_id:String,generation:u64,error:String},
+}
+fn bootstrap_ready(receiver:&std::sync::mpsc::Receiver<Result<MemoryBootstrapAck,String>>,task:&TaskContext,timeout:std::time::Duration,cancelled:&std::sync::atomic::AtomicBool)->Result<(),String>{
+    if cancelled.load(std::sync::atomic::Ordering::SeqCst){return Err("项目记忆加载已取消".into());}
+    let deadline=std::time::Instant::now()+timeout;
+    let ack=loop {
+        if cancelled.load(std::sync::atomic::Ordering::SeqCst){return Err("项目记忆加载已取消".into());}
+        let remaining=deadline.saturating_duration_since(std::time::Instant::now());
+        match receiver.recv_timeout(remaining.min(std::time::Duration::from_millis(50))) {
+            Ok(value)=>break value?,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) if std::time::Instant::now()<deadline=>continue,
+            Err(_)=>return Err("项目记忆加载未确认，未发送需求".into()),
+        }
+    };
+    if cancelled.load(std::sync::atomic::Ordering::SeqCst){return Err("项目记忆加载已取消".into());}
+    match ack {
+        MemoryBootstrapAck::Ready{mod_id,session_id,task_id,generation,snapshot_id,sha256} if mod_id==task.mod_id && session_id==task.session_id && task_id==task.task_id && generation==task.generation && task.context_snapshot_id.as_deref()==Some(snapshot_id.as_str()) && task.memory_bootstrap_sha256.as_deref()==Some(sha256.as_str())=>Ok(()),
+        MemoryBootstrapAck::Error{mod_id,session_id,task_id,generation,error} if mod_id==task.mod_id && session_id==task.session_id && task_id==task.task_id && generation==task.generation=>Err(format!("项目记忆加载失败：{error}")),
+        _=>Err("项目记忆加载回执身份不一致，未发送需求".into()),
+    }
+}
+
+/// 调用方先持生命周期预留；这里不持 StorageState，关闭时不反向等待存储锁。
+pub(crate) fn close_idle_project(app: &tauri::AppHandle,id: &str) -> Result<(),String> {
+    let slots=app.state::<PiState>().0.for_project(id)?;
+    for slot in slots {
+        let mut inner=slot.try_lock().map_err(|_| "项目会话正忙，请稍后重试")?;
+        if inner.process.as_ref().is_some_and(|p|p.active || p.compacting || p.stopping || p.task.as_ref().is_some_and(|t|matches!(t.status.as_str(),"preparing"|"running"|"stopping"))) {return Err("请先结束项目中的活动任务或压缩操作".into());}
+        stop(app,&mut inner)?;
+    }
+    Ok(())
+}
+pub(crate) fn forget_project(app: &tauri::AppHandle,id: &str) -> Result<(),String> {
+    app.state::<PiState>().0.remove_project(id)
+}
 
 fn persist_task(app: &tauri::AppHandle, task: &mut TaskRecord) -> Result<(), String> {
     if !matches!(task.status.as_str(), "running" | "preparing") && task.finished_at.is_none() {
@@ -237,6 +287,7 @@ fn stop(app: &tauri::AppHandle, inner: &mut Inner) -> Result<(), String> {
 /// 意外关闭 stdout 与用户停止分别记录，不能把进程崩溃显示为手动取消。
 fn stop_inner(app: &tauri::AppHandle, inner: &mut Inner, unexpected: bool) -> Result<(), String> {
     if let Some(process) = inner.process.as_ref() {
+        for token in process.tool_cancellations.values(){token.store(true,std::sync::atomic::Ordering::SeqCst);}
         if let Some(job) = &process._job { job.terminate_and_wait()?; }
     }
     if let Some(mut process) = inner.process.take() {
@@ -292,7 +343,7 @@ fn register_prepared_delivery(app: &tauri::AppHandle, process: &mut Process, gen
     for raw in details["commands"].as_array().ok_or("交付缺少真实打包命令记录")? {
         record_receipt(app, task, serde_json::from_value(raw.clone()).map_err(|e| e.to_string())?, tool_id)?;
     }
-    let version = crate::artifacts::registry::register(app, task, serde_json::from_value(details.clone()).map_err(|e| e.to_string())?, &input)?;
+    let version = crate::artifacts::registry::register(app, task, serde_json::from_value(details.clone()).map_err(|e| e.to_string())?, &input, &process.known_secrets, None)?;
     persist_task(app, task)?;
     let artifact = json!({ "type": "artifact_registered", "taskId": task.context.task_id, "versionId": version.version_id });
     emit(process, generation, "artifact", artifact);
@@ -347,7 +398,7 @@ fn handle_record(app: &tauri::AppHandle, process: &mut Process, generation: u64,
     if record_type == "compaction_start" { process.compacting = true; }
     if record_type == "compaction_end" || (record_type == "response" && record["command"] == "compact") { process.compacting = false; }
     if record_type == "tool_execution_start" {
-        if let Some(id) = record["toolCallId"].as_str() { process.tool_inputs.insert(id.into(), record["args"].clone()); }
+        if let Some(id) = record["toolCallId"].as_str() { process.tool_inputs.insert(id.into(), record["args"].clone()); process.tool_names.insert(id.into(),record["toolName"].as_str().unwrap_or("").into()); process.tool_cancellations.insert(id.into(),Arc::new(std::sync::atomic::AtomicBool::new(false))); }
     }
     if record_type == "message_end" && record["message"]["stopReason"] == "error" {
         if let Some(task) = process.task.as_mut() { task.status = "failed".into(); persist_task(app, task)?; }
@@ -365,6 +416,7 @@ fn handle_record(app: &tauri::AppHandle, process: &mut Process, generation: u64,
         refresh_changes(app, process, generation, true)?;
     }
     if record_type == "tool_execution_end" {
+        if let Some(token)=record["toolCallId"].as_str().and_then(|id|process.tool_cancellations.get(id)){token.store(true,std::sync::atomic::Ordering::SeqCst);}
         if let Some(task) = process.task.as_mut() {
             let tool_id = record["toolCallId"].as_str().ok_or("工具结束事件缺少 ID")?;
             let logs = paths::project_dir(app, &task.context.mod_id)?.join("logs").join(&task.context.task_id);
@@ -455,10 +507,20 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
         value.context.generation = generation;
         command.env("GEN_MOD_TASK_CONTEXT", serde_json::to_string(&value.context).map_err(|e| e.to_string())?);
         command.arg("--extension").arg(runtime::resources(app)?.join("pi-portable-v1.1.0/extensions/mod-tools.ts"))
-            .args(["--tools", "read,edit,write,grep,find,ls,run_command,prepare_delivery"]);
+            .args(["--tools", "read,edit,write,grep,find,ls,run_command,prepare_delivery,read_project_context,read_project_memory_sources,update_project_memory,read_feedback_sources,propose_verification,search_game_knowledge,save_long_term_memory,read_game_inspection"]);
     } else {
         command.env_remove("GEN_MOD_TASK_CONTEXT").args(["--no-tools"]);
     }
+    let (bootstrap_tx,bootstrap_rx)=std::sync::mpsc::channel();
+    let expects_bootstrap=task.is_some();
+    let task_bootstrap=task.as_ref().map(|_|bootstrap_rx);
+    let preparation_cancel=Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let preparation_guard=if task.is_some(){
+        let registry=app.state::<PiState>().1.clone();
+        let key=(mod_id.to_string(),session_id.to_string());
+        registry.lock().map_err(|_|"任务准备状态锁异常")?.insert(key.clone(),Preparation{generation,cancelled:preparation_cancel.clone(),channel:channel.clone()});
+        Some(PreparationGuard{registry,key})
+    }else{None};
     let mut child = command.spawn().map_err(|e| format!("无法启动内置 pi：{e}"))?;
     let job = match ProcessJob::assign(&child) {
         Ok(job) => job,
@@ -467,7 +529,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     let stdin = child.stdin.take().ok_or("pi stdin 未建立")?;
     let stdout = child.stdout.take().ok_or("pi stdout 未建立")?;
     let stderr = child.stderr.take().ok_or("pi stderr 未建立")?;
-    inner.process = Some(Process { child, stdin, _job: Some(job), _configuration: configuration, channel, mod_id: mod_id.into(), session_id: session_id.into(), task, active: false, compacting: false, prompt_id: None, tool_inputs: std::collections::BTreeMap::new(), app: app.clone(), pending_title: None, waiting_leases: vec![], command_baselines: Default::default(), steering: vec![], steering_queue: vec![], consumed_inputs: Default::default(), confirming_input: None, stopping: false, model: selected_model });
+    inner.process = Some(Process { child, stdin, _job: Some(job), _configuration: configuration, channel, mod_id: mod_id.into(), session_id: session_id.into(), task, active: false, compacting: false, prompt_id: None, tool_inputs: std::collections::BTreeMap::new(), tool_names: Default::default(), app: app.clone(), pending_title: None, waiting_leases: vec![], command_baselines: Default::default(), steering: vec![], steering_queue: vec![], consumed_inputs: Default::default(), confirming_input: None, stopping: false, model: selected_model, known_secrets: config.secrets.clone(), tool_cancellations: Default::default(), bootstrap: task_bootstrap, preparation_guard, preparation_cancel });
     if let Some(process) = &inner.process {
         emit(process, generation, "diagnostic", json!({ "type": "runtime_started", "message": format!("启动 pi · 会话 {session_id} · 工作目录 {}", source.display()) }));
         if let Some(task) = &process.task { emit(process, generation, "task", json!({ "type": "task_started", "context": task.context })); }
@@ -494,6 +556,54 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
             match serde_json::from_slice::<Value>(&bytes) {
                 Ok(mut record) if record.get("type").and_then(Value::as_str).is_some() => {
                     redact(&mut record, &stdout_secrets);
+                    if record["type"]=="extension_ui_request" && record["method"]=="input" && (super::task_tools::expected_tool(record["title"].as_str().unwrap_or("")).is_some() || record["title"]=="gen-mod:register-delivery") {
+                        let title=record["title"].as_str().unwrap_or("").to_string();
+                        let request=serde_json::from_str::<Value>(record["placeholder"].as_str().unwrap_or(""));
+                        let prepared=(||->Result<_,String>{
+                            let request=request.map_err(|e|e.to_string())?;
+                            let task=process.task.clone().ok_or("没有活动任务")?;
+                            let tool=request["toolCallId"].as_str().ok_or("缺少工具调用 ID")?.to_string();
+                            let expected=if title=="gen-mod:register-delivery" {"prepare_delivery"}else{super::task_tools::expected_tool(&title).ok_or("未知工具请求")?};
+                            if process.tool_names.get(&tool).map(String::as_str)!=Some(expected){return Err("请求没有对应工具调用".into());}
+                            if title!="gen-mod:register-delivery" && (request["modId"]!=task.context.mod_id || request["sessionId"]!=task.context.session_id || request["taskId"]!=task.context.task_id || request["generation"]!=generation){return Err("任务请求身份不匹配".into());}
+                            let input=process.tool_inputs.get(&tool).ok_or("工具参数缺失")?.clone();
+                            let cancelled=process.tool_cancellations.get(&tool).ok_or("工具执行状态缺失")?.clone();
+                            Ok((request,task,tool,input,cancelled))
+                        })();
+                        let (request,mut task,tool,input,cancelled)=match prepared {Ok(v)=>v,Err(error)=>{
+                            let _=writeln!(process.stdin,"{}",json!({"type":"extension_ui_response","id":record["id"],"value":json!({"error":error}).to_string()}));let _=process.stdin.flush();continue;
+                        }};
+                        let worker_app=app_stdout.clone();let worker_slot=shared_stdout.clone();let reply_id=record["id"].clone();let secrets=process.known_secrets.clone();
+                        std::thread::spawn(move||{
+                            let result=(||->Result<Value,String>{
+                                if title=="gen-mod:register-delivery" {
+                                    let details=&request["delivery"];
+                                    {
+                                        let mut inner=worker_slot.0.lock().map_err(|_|"会话运行锁异常")?;
+                                        if inner.generation!=generation{return Err("任务已替换".into());}
+                                        let process=inner.process.as_mut().ok_or("任务已停止")?;
+                                        let live=process.task.as_mut().filter(|v|v.context.task_id==task.context.task_id&&v.status=="running").ok_or("任务已停止")?;
+                                        for raw in details["commands"].as_array().ok_or("缺少打包命令记录")?{record_receipt(&worker_app,live,serde_json::from_value(raw.clone()).map_err(|e|e.to_string())?,&tool)?;}
+                                        task=live.clone();
+                                    }
+                                    let version=crate::artifacts::registry::register(&worker_app,&mut task,serde_json::from_value(details.clone()).map_err(|e|e.to_string())?,&input,&secrets,Some(&cancelled))?;
+                                    Ok(json!({"versionId":version.version_id}))
+                                }else{super::task_tools::execute(&worker_app,&task.context,&title,&request,&input,&secrets,&cancelled)}
+                            })();
+                            if let Ok(mut inner)=worker_slot.0.lock(){
+                                if inner.generation==generation {
+                                    if let Some(process)=inner.process.as_mut().filter(|p|p.task.as_ref().is_some_and(|t|t.context.task_id==task.context.task_id)){
+                                        let value=result.unwrap_or_else(|error|json!({"error":error,"requiresNewTask":title=="gen-mod:register-delivery"}));
+                                        if title=="gen-mod:propose-verification" && value.get("error").is_none(){emit(process,generation,"task",json!({"type":"feedback_draft_updated"}));}
+                                        if title=="gen-mod:update-project-memory" && value["projectMemoryUpdate"]["outcome"]=="saved" {emit(process,generation,"task",json!({"type":"project_memory_updated","revision":value["projectMemoryUpdate"]["revision"]}));}
+                                        if let Some(id)=value["versionId"].as_str(){if let Some(live)=process.task.as_mut(){live.registered_version_id=task.registered_version_id.clone();}emit(process,generation,"artifact",json!({"type":"artifact_registered","versionId":id,"taskId":task.context.task_id}));}
+                                        let _=writeln!(process.stdin,"{}",json!({"type":"extension_ui_response","id":reply_id,"value":value.to_string()}));let _=process.stdin.flush();
+                                    }
+                                }
+                            }
+                        });
+                        continue;
+                    }
                     if record["type"] == "extension_ui_request" && record["title"] == "gen-mod:workspace" {
                         let request = serde_json::from_str::<Value>(record["placeholder"].as_str().unwrap_or(""));
                         if let Ok(request) = request {
@@ -531,7 +641,8 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
                                         }
                                         return;
                                     }
-                                    let result = match request["action"].as_str() {
+                                    let reference_check=if request["action"]=="acquire" && matches!(request["operation"].as_str(),Some("run_command"|"prepare_delivery")) {crate::project_context::check_task_references(&worker_app,&context)}else{Ok(())};
+                                    let result = if let Err(error)=reference_check {Err(error)}else{match request["action"].as_str() {
                                         Some("acquire") => workspaces.acquire(&worker_app,&context,&request).and_then(|value| {
                                             if !matches!(request["operation"].as_str(),Some("run_command"|"prepare_delivery")) { return Ok(value); }
                                             // 独占租约取得后、回传给扩展前取基线，此时命令尚未启动。
@@ -566,7 +677,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
                                         },
                                         Some("cancel") => workspaces.cancel(&context.mod_id,request["leaseId"].as_str().unwrap_or("")).map(|_|json!({})),
                                         _ => Err("未知工作区请求".into())
-                                    };
+                                    }};
                                     if let Ok(mut inner) = worker_slot.0.lock() {
                                         if inner.generation == generation {
                                             if let Some(process) = inner.process.as_mut() {
@@ -606,11 +717,25 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     // 非当前 provider 的 Key 同样不能进入诊断或任务日志。
     let secrets = config.secrets.clone();
     std::thread::spawn(move || {
+        let mut bootstrap_waiting=expects_bootstrap;
+        let mut initialization_diagnostics=Vec::new();
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            // 握手先投递专用通道，不能等待正持槽锁的任务准备线程。
+            if let Some(raw)=line.strip_prefix("GEN_MOD_MEMORY_BOOTSTRAP ") {
+                let ack=if raw.len()>4096 {Err("项目记忆回执超过上限".into())}else{serde_json::from_str::<MemoryBootstrapAck>(raw).map_err(|_|"项目记忆回执格式无效".into())};
+                let _=bootstrap_tx.send(ack);
+                bootstrap_waiting=false;
+                continue;
+            }
             let message = secrets.iter().fold(line, |text, key| text.replace(key, "[redacted]"));
+            if bootstrap_waiting {
+                if initialization_diagnostics.len()<20 {initialization_diagnostics.push(message.chars().take(2000).collect::<String>());}
+                continue;
+            }
             let inner = match shared_stderr.0.lock() { Ok(value) => value, Err(_) => break };
             if inner.generation != generation { break; }
             if let Some(process) = &inner.process {
+                for message in initialization_diagnostics.drain(..){emit(process,generation,"diagnostic",json!({"type":"stderr","message":message}));}
                 let diagnostic = message.strip_prefix("GEN_MOD_DIAGNOSTIC ").and_then(|raw|serde_json::from_str::<Value>(raw).ok()).filter(|v|v["type"]=="command_diagnostic");
                 if let Some(mut record) = diagnostic {
                     record["message"] = format!("运行时诊断 · {}",record).into();
@@ -618,11 +743,15 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
                 } else { emit(process, generation, "diagnostic", json!({ "type": "stderr", "message": message })); }
             }
         }
+        let _=bootstrap_tx.send(Err("运行时在项目记忆加载前退出".into()));
     });
     Ok(generation)
 }
 
 fn session(app: &tauri::AppHandle, mod_id: &str, requested: Option<&str>) -> Result<String, String> {
+    session_selected(app,mod_id,requested,None)
+}
+fn session_selected(app: &tauri::AppHandle, mod_id: &str, requested: Option<&str>, new_id: Option<&str>) -> Result<String, String> {
     let project = crate::storage::repository::update(app,mod_id,|project| crate::skills::registry::refresh_sessions(app,project))?;
     if let Some(id) = requested.filter(|id| !id.is_empty()) {
         paths::validate_id(id)?;
@@ -630,7 +759,7 @@ fn session(app: &tauri::AppHandle, mod_id: &str, requested: Option<&str>) -> Res
         if value.read_only { return Err("此会话的能力上下文已改变，只能查看历史".into()) }
         return Ok(id.into());
     }
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = new_id.map(str::to_owned).unwrap_or_else(||uuid::Uuid::new_v4().to_string());
     let skills = crate::skills::registry::snapshots(&crate::skills::registry::resolve(app, &project.game_skill_name)?);
     crate::storage::repository::update(app,mod_id,|project| {
         project.sessions.push(SessionReference { session_id: id.clone(), session_file: String::new(), skills, read_only: false, name: String::new() }); Ok(())
@@ -650,17 +779,19 @@ pub fn create_mod_session(app: tauri::AppHandle, storage: tauri::State<StorageSt
 }
 #[tauri::command]
 pub fn connect_pi(app: tauri::AppHandle, state: tauri::State<PiState>, storage: tauri::State<StorageState>, mod_id: String, session_id: Option<String>, on_event: Channel<Envelope>) -> Result<Identity, String> {
-    let id = {
-        let _storage = storage.0.lock().map_err(|_| "项目存储锁异常")?;
-        session(&app, &mod_id, session_id.as_deref())?
-    };
+    let requested=session_id.filter(|id|!id.is_empty());
+    let id=requested.clone().unwrap_or_else(||uuid::Uuid::new_v4().to_string());
     let slot = SlotState(state.0.slot(&mod_id,&id)?);
     let mut inner = slot.0.lock().map_err(|_| "会话运行锁异常")?;
+    let _reservation=app.state::<super::workspace::Workspaces>().try_reserve_native(&mod_id,super::workspace::NativeOperation::ProcessConnect)?;
     if inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("目标会话正在运行".into()); }
+    let _storage=storage.0.lock().map_err(|_| "项目存储锁异常")?;
+    session_selected(&app,&mod_id,requested.as_deref(),Some(&id))?;
     let metadata = crate::storage::repository::read_session_metadata(app.clone(),mod_id.clone(),id.clone())?;
     if let Some(error) = metadata["modelState"]["error"].as_str().filter(|error| !error.is_empty()) { return Err(error.into()); }
     let selection = serde_json::from_value::<crate::config::ModelSelection>(metadata["modelState"]["selection"].clone()).map_err(|e| e.to_string())?;
     crate::storage::repository::save_model(&app, &mod_id, &id, Some(&selection))?;
+    drop(_storage);
     let generation = spawn(&app, &slot, &mut inner, &mod_id, &id, on_event, None)?;
     if let Some(process) = inner.process.as_mut() {
         writeln!(process.stdin, "{}", json!({ "type": "set_thinking_level", "level": metadata["modelState"]["thinkingLevel"], "id": format!("native-thinking-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
@@ -698,6 +829,7 @@ pub struct ModelChange {
 pub fn select_session_model(app: tauri::AppHandle, state: tauri::State<PiState>, storage: tauri::State<StorageState>, mod_id: String, session_id: String, selection: crate::config::ModelSelection, on_event: Channel<Envelope>) -> Result<ModelChange, String> {
     let slot = SlotState(state.0.slot(&mod_id, &session_id)?);
     let mut inner = slot.0.lock().map_err(|_| "会话运行锁异常")?;
+    let _reservation=app.state::<super::workspace::Workspaces>().try_reserve_native(&mod_id,super::workspace::NativeOperation::ProcessConnect)?;
     if inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.stopping || p.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("请等待会话空闲后操作".into()); }
     let _storage = storage.0.lock().map_err(|_| "项目存储锁异常")?;
     session(&app, &mod_id, Some(&session_id))?;
@@ -707,8 +839,12 @@ pub fn select_session_model(app: tauri::AppHandle, state: tauri::State<PiState>,
     // 准备配置前完成凭据校验，密钥不会返回前端。
     crate::config::read_for(&app, &selection)?;
     let reconnect = inner.process.is_some();
+    drop(_storage);
     if reconnect { stop(&app, &mut inner)?; }
-    crate::storage::repository::save_model(&app, &mod_id, &session_id, Some(&selection))?;
+    {
+        let _storage=storage.0.lock().map_err(|_| "项目存储锁异常")?;
+        crate::storage::repository::save_model(&app, &mod_id, &session_id, Some(&selection))?;
+    }
     let changed = (|| -> Result<Option<u64>, String> {
         if !reconnect { return Ok(None); }
         let generation = spawn(&app, &slot, &mut inner, &mod_id, &session_id, on_event, None)?;
@@ -724,6 +860,7 @@ pub fn select_session_model(app: tauri::AppHandle, state: tauri::State<PiState>,
         Ok(generation) => Ok(ModelChange { model_state, generation }),
         Err(error) => {
             let cleanup = stop(&app, &mut inner);
+            let _storage=storage.0.lock().map_err(|_| "项目存储锁异常")?;
             crate::storage::repository::save_model(&app, &mod_id, &session_id, previous.as_ref()).map_err(|rollback| format!("{error}；恢复模型记录失败：{rollback}"))?;
             cleanup.map_err(|cleanup| format!("{error}；回收运行时失败：{cleanup}"))?;
             Err(format!("模型切换失败，已恢复原选择；{error}"))
@@ -733,10 +870,22 @@ pub fn select_session_model(app: tauri::AppHandle, state: tauri::State<PiState>,
 
 #[tauri::command]
 pub fn send_pi_command(app: tauri::AppHandle, state: tauri::State<PiState>, mod_id: String, session_id: String, generation: u64, command: Value) -> Result<(), String> {
+    // 任务握手持槽锁等待，取消必须能先送达，不能排到 prompt 发送之后。
+    if command["type"]=="abort" {
+        let preparing=state.1.lock().map_err(|_|"任务准备状态锁异常")?;
+        if let Some(value)=preparing.get(&(mod_id.clone(),session_id.clone())) {
+            if value.generation!=generation{return Err("连接已被替换".into());}
+            if command["id"].as_str().is_none(){return Err("RPC 缺少请求 ID".into());}
+            value.cancelled.store(true,std::sync::atomic::Ordering::SeqCst);
+            let _=value.channel.send(Envelope{mod_id,session_id,task_id:None,generation,kind:"record".into(),record:json!({"type":"response","command":"abort","id":command["id"],"success":true})});
+            return Ok(());
+        }
+    }
     let slot = state.0.slot(&mod_id,&session_id)?;
-    let mut inner = slot.lock().map_err(|_| "运行时锁异常")?;
+    let mut inner = if command["type"]=="abort" {slot.try_lock().map_err(|_|"任务准备中的取消尚未受理，请稍后重试")?}else{slot.lock().map_err(|_| "运行时锁异常")?};
     if inner.generation != generation { return Err("连接已被替换".into()) }
     let process = inner.process.as_mut().ok_or("pi 尚未连接")?;
+    crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
     let kind = command["type"].as_str().ok_or("RPC 缺少类型")?;
     if !matches!(kind, "get_state" | "get_messages" | "get_commands" | "get_entries" | "get_tree" | "get_session_stats" | "get_available_thinking_levels" | "set_thinking_level" | "compact" | "abort" | "extension_ui_response") { return Err("此 RPC 命令不能由前端直接发送".into()) }
     if matches!(kind, "compact" | "set_thinking_level") && (process.active || process.compacting || process.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("请等待会话空闲后操作".into()); }
@@ -790,6 +939,7 @@ fn validate_images(images: &[Value]) -> Result<(),String> {
 /// 只允许向身份及任务完全匹配的活动 Agent 发送引导，不创建任务或进程。
 #[tauri::command]
 pub fn steer_mod_task(app: tauri::AppHandle, state: tauri::State<PiState>, mod_id: String, session_id: String, generation: u64, task_id: String, input_id: String, message: String, images: Option<Vec<Value>>) -> Result<(),String> {
+    crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
     paths::validate_id(&input_id)?;
     let images = images.unwrap_or_default(); validate_images(&images)?;
     if message.trim().is_empty() { return Err("引导不能为空".into()); }
@@ -876,6 +1026,7 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
     let slot = SlotState(state.0.slot(&mod_id,&session_id)?);
     let mut inner = slot.0.lock().map_err(|_| "运行时锁异常")?;
     if inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("已有任务正在运行，请先取消或等待结束".into()) }
+    let reservation = app.state::<super::workspace::Workspaces>().try_reserve_native(&mod_id, super::workspace::NativeOperation::TaskPrepare)?;
     let _storage = storage.0.lock().map_err(|_| "项目存储锁异常")?;
     mods::read_project(&app, &mod_id)?;
     if requirement.trim().is_empty() { return Err("需求不能为空".into()) }
@@ -893,11 +1044,29 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
     let task_directory = directory.join("logs").join(&task_id);
     let staging = task_directory.join("staging").join(&staging_id);
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let context = TaskContext { task_id, mod_id: mod_id.clone(), session_id: id.clone(), generation: inner.generation + 1, source_directory: directory.join("source").to_string_lossy().into_owned(), staging_id, staging_directory: staging.to_string_lossy().into_owned(), created_at: mods::now()? };
-    let mut task = TaskRecord { context: context.clone(), status: "preparing".into(), finished_at: None, commands: vec![], registered_version_id: None };
-    persist_task(&app, &mut task)?;
+    let mut context = TaskContext { task_id, mod_id: mod_id.clone(), session_id: id.clone(), generation: inner.generation + 1, source_directory: directory.join("source").to_string_lossy().into_owned(), staging_id, staging_directory: staging.to_string_lossy().into_owned(), created_at: mods::now()?, context_snapshot_id: None, memory_bootstrap_path: None, memory_bootstrap_sha256: None };
+    let (snapshot,mut task)={
+        let mut db=crate::storage::database::connect(&app)?;
+        let tx=db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+        crate::project_lifecycle::repository::ensure_writable_on(&tx,&mod_id)?;
+        let snapshot=crate::project_context::repository::snapshot_on(&tx,&mod_id,&context.task_id,&uuid::Uuid::new_v4().to_string(),&context.created_at)?;
+        context.context_snapshot_id=Some(snapshot.snapshot_id.clone());
+        let task=TaskRecord{context:context.clone(),status:"preparing".into(),finished_at:None,commands:vec![],registered_version_id:None};
+        crate::storage::repository::task_on(&tx,&task)?;
+        tx.commit().map_err(|e|e.to_string())?;
+        (snapshot,task)
+    };
+    let prepared=(||->Result<(),String>{
+        let path=crate::project_context::bootstrap::write_bootstrap(&app,&context,&snapshot)?;
+        context.memory_bootstrap_sha256=Some(crate::changes::file_hash(&path)?);
+        context.memory_bootstrap_path=Some(path.to_string_lossy().into_owned());
+        task.context=context.clone();
+        persist_task(&app,&mut task)
+    })();
+    if let Err(error)=prepared {task.status="failed".into();persist_task(&app,&mut task)?;return Err(error);}
     let exclusions: Vec<String> = crate::skills::registry::resolve(&app, &project.game_skill_name)?.iter().flat_map(|v| v.definition.exclude_paths.clone()).collect();
     drop(_storage);
+    drop(reservation);
     let lease_id = uuid::Uuid::new_v4().to_string();
     let workspace_request = json!({"leaseId":lease_id,"toolCallId":"native-snapshot","operation":"snapshot"});
     let workspaces = app.state::<super::workspace::Workspaces>();
@@ -917,8 +1086,13 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
         return Err(error);
     }
     task.context.generation=inner.generation;
+    let preparation_cancel=inner.process.as_ref().ok_or("pi 进程未建立")?.preparation_cancel.clone();
     let started = (|| -> Result<TaskContext,String> {
     let process = inner.process.as_mut().ok_or("pi 进程未建立")?;
+    let receiver=process.bootstrap.take().ok_or("缺少项目记忆加载通道")?;
+    let cancelled=preparation_cancel.clone();
+    let _preparing=process.preparation_guard.take().ok_or("缺少任务准备取消注册")?;
+    bootstrap_ready(&receiver,&task.context,std::time::Duration::from_secs(10),&cancelled)?;
     process.prompt_id = Some(request_id.clone());
     process.pending_title = project.sessions.iter().find(|s| s.session_id == id && s.name.is_empty())
         .map(|_| requirement.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect());
@@ -930,14 +1104,18 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
     writeln!(process.stdin, "{}", json!({ "type": "get_available_thinking_levels", "id": format!("native-levels-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
     writeln!(process.stdin, "{}", json!({ "type": "get_state", "id": format!("native-state-{}", uuid::Uuid::new_v4()) })).map_err(|e| e.to_string())?;
     writeln!(process.stdin,"{}",json!({"type":"set_steering_mode","mode":"one-at-a-time","id":format!("native-steering-{}",uuid::Uuid::new_v4())})).map_err(|e|e.to_string())?;
-    writeln!(process.stdin, "{}", json!({ "type": "prompt", "id": request_id, "message": requirement, "images": images })).map_err(|e| e.to_string())?;
-    process.stdin.flush().map_err(|e| e.to_string())?;
+    {
+        let _preparation_lock=state.1.lock().map_err(|_|"任务准备状态锁异常")?;
+        if cancelled.load(std::sync::atomic::Ordering::SeqCst){return Err("项目记忆加载已取消，未发送需求".into());}
+        writeln!(process.stdin, "{}", json!({ "type": "prompt", "id": request_id, "message": requirement, "images": images })).map_err(|e| e.to_string())?;
+        process.stdin.flush().map_err(|e| e.to_string())?;
+    }
     crate::storage::repository::update(&app,&mod_id,|project| { project.development_status = DevelopmentStatus::Running; Ok(()) })?;
     Ok(process.task.as_ref().ok_or("任务记录缺失")?.context.clone())
     })();
     if let Err(error)=&started {
         let cleanup=stop(&app,&mut inner);
-        task.status="failed".into();
+        task.status=if preparation_cancel.load(std::sync::atomic::Ordering::SeqCst){"cancelled"}else{"failed"}.into();
         persist_task(&app,&mut task)?;
         if let Err(cleanup)=cleanup { return Err(format!("{error}；进程回收失败：{cleanup}")); }
     }
@@ -962,6 +1140,7 @@ pub fn delete_mod_session(app: tauri::AppHandle, state: tauri::State<PiState>, s
     if inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.task.as_ref().is_some_and(|t| t.status == "running")) { return Err("请等待会话空闲后删除".into()); }
     if inner.process.as_ref().is_some_and(|p|p.mod_id==mod_id && p.session_id==session_id) { stop(&app,&mut inner)?; }
     let _lock = storage.0.lock().map_err(|_| "项目存储锁异常")?;
+    crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
     paths::validate_id(&session_id)?;
     let mut project = mods::read_project(&app, &mod_id)?;
     let session = project.sessions.iter().find(|s| s.session_id == session_id).ok_or("会话不属于当前项目")?;
@@ -1000,4 +1179,41 @@ pub fn while_idle<T>(app: &tauri::AppHandle, operation: impl FnOnce() -> Result<
     let guards = slots.iter().map(|slot| slot.lock().map_err(|_| "会话运行锁异常")).collect::<Result<Vec<_>,_>>()?;
     if guards.iter().any(|inner| inner.process.as_ref().is_some_and(|p| p.active || p.compacting || p.task.as_ref().is_some_and(|t| t.status == "running"))) { return Err("请等待会话空闲后操作".into()); }
     operation()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn task()->TaskContext{serde_json::from_value(json!({"modId":"p","sessionId":"s","taskId":"t","generation":2,"contextSnapshotId":"snap","memoryBootstrapSha256":"hash","memoryBootstrapPath":"file","sourceDirectory":"source","stagingId":"stage","stagingDirectory":"stage","createdAt":"now"})).unwrap()}
+    fn ack()->MemoryBootstrapAck{MemoryBootstrapAck::Ready{mod_id:"p".into(),session_id:"s".into(),task_id:"t".into(),generation:2,snapshot_id:"snap".into(),sha256:"hash".into()}}
+    #[test]
+    fn memory_bootstrap_rejects_error_wrong_identity_timeout_exit_and_late_ready(){
+        let task=task();
+        for raw in [json!({"status":"ready","modId":"p","sessionId":"s","taskId":"other","generation":2,"snapshotId":"snap","sha256":"hash"}),json!({"status":"ready","modId":"p","sessionId":"s","taskId":"t","generation":2,"snapshotId":"snap","sha256":"bad"}),json!({"status":"error","modId":"p","sessionId":"s","taskId":"t","generation":2,"error":"无法读取本任务项目记忆"})] {
+            let (tx,rx)=std::sync::mpsc::channel();tx.send(Ok(serde_json::from_value(raw).unwrap())).unwrap();
+            assert!(bootstrap_ready(&rx,&task,std::time::Duration::ZERO,&std::sync::atomic::AtomicBool::new(false)).is_err());
+        }
+        let (tx,rx)=std::sync::mpsc::channel();
+        assert!(bootstrap_ready(&rx,&task,std::time::Duration::ZERO,&std::sync::atomic::AtomicBool::new(false)).is_err());
+        tx.send(Ok(ack())).unwrap();assert!(bootstrap_ready(&rx,&task,std::time::Duration::ZERO,&std::sync::atomic::AtomicBool::new(true)).is_err());
+        drop(tx);assert!(bootstrap_ready(&rx,&task,std::time::Duration::ZERO,&std::sync::atomic::AtomicBool::new(true)).is_err());
+        let (tx,rx)=std::sync::mpsc::channel::<Result<MemoryBootstrapAck,String>>();drop(tx);
+        assert!(bootstrap_ready(&rx,&task,std::time::Duration::ZERO,&std::sync::atomic::AtomicBool::new(false)).is_err());
+    }
+    #[test]
+    fn bootstrap_channel_can_deliver_while_target_slot_is_locked(){
+        let slot=Arc::new(Mutex::new(()));let _held=slot.lock().unwrap();
+        let (tx,rx)=std::sync::mpsc::channel();
+        let worker=std::thread::spawn(move||{tx.send(Ok(ack())).unwrap();});
+        bootstrap_ready(&rx,&task(),std::time::Duration::from_secs(1),&std::sync::atomic::AtomicBool::new(false)).unwrap();
+        worker.join().unwrap();
+    }
+    #[test]
+    fn cancellation_during_bootstrap_wait_rejects_a_late_ready(){
+        let cancelled=Arc::new(std::sync::atomic::AtomicBool::new(false));let cancel=cancelled.clone();
+        let (tx,rx)=std::sync::mpsc::channel();
+        let worker=std::thread::spawn(move||{cancel.store(true,std::sync::atomic::Ordering::SeqCst);tx.send(Ok(ack())).unwrap();});
+        let result=bootstrap_ready(&rx,&task(),std::time::Duration::from_secs(1),&cancelled);
+        worker.join().unwrap();assert!(result.is_err());
+    }
 }
