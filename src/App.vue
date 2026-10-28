@@ -6,6 +6,7 @@ import { nativeCall } from '@/services/native'
 import { authInvalidEvent, cloudUser } from '@/features/auth/state'
 import type { CloudUser } from '@/features/auth/state'
 const WorkbenchLayout = defineAsyncComponent(() => import('@/features/workbench/WorkbenchLayout.vue'))
+const CloudUpdates = defineAsyncComponent(() => import('@/features/skills/CloudUpdates.vue'))
 const LoginPage = defineAsyncComponent(() => import('@/features/auth/LoginPage.vue'))
 const ready = shallowRef(false)
 const error = shallowRef('')
@@ -20,7 +21,7 @@ onMounted(() => { window.addEventListener(authInvalidEvent, invalid); void refre
 onUnmounted(() => window.removeEventListener(authInvalidEvent, invalid))
 </script>
 <template>
-  <template v-if="ready && cloudUser"><WorkbenchLayout /></template>
+  <div v-if="ready && cloudUser" class="flex h-full min-h-0 flex-col"><CloudUpdates /><div class="min-h-0 flex-1"><WorkbenchLayout /></div></div>
   <LoginPage v-else-if="ready" @authenticated="authenticated" />
   <main v-else class="flex h-full flex-col items-center justify-center gap-4 p-8"><Alert v-if="error" variant="destructive"><AlertDescription>{{ error }}</AlertDescription></Alert><p v-else>正在检查登录状态…</p><Button v-if="error" @click="refresh">重试</Button></main>
 </template>

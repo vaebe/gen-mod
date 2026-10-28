@@ -25,6 +25,7 @@ pub fn run() {
         .setup(|app| { storage::database::initialize(app.handle()).map_err(std::io::Error::other)?; Ok(()) })
         .invoke_handler({ let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             cloud::auth::cloud_register,cloud::auth::cloud_login,cloud::auth::cloud_logout,cloud::auth::cloud_me,cloud::auth::cloud_configuration,
+            cloud::catalog::cloud_check_updates,cloud::catalog::cloud_confirm_updates,cloud::catalog::cloud_games,
             project_lifecycle::set_mod_archived,project_lifecycle::list_archived_mods,project_lifecycle::delete_mod,
             knowledge::get_long_term_memory, knowledge::list_long_term_memories,
             knowledge::save_long_term_memory_entry, knowledge::set_long_term_memory_status,

@@ -36,7 +36,7 @@ fn inventory(root: &Path) -> Result<BTreeMap<String, PathBuf>, String> {
     walk(root, root, &mut files)?;
     Ok(files)
 }
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64 && !name.starts_with('-') && !name.ends_with('-') && !name.contains("--")
         && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
@@ -56,7 +56,7 @@ fn frontmatter(text: &str) -> Result<(String, String), String> {
     if !valid_name(&front.name) || front.description.trim().is_empty() { return Err("SKILL.md 需有效 name 和 description".into()); }
     Ok((front.name, front.description.trim().into()))
 }
-fn validate(definition: &SkillDefinition, root: &Path) -> Result<(String, Vec<String>), String> {
+pub(crate) fn validate(definition: &SkillDefinition, root: &Path) -> Result<(String, Vec<String>), String> {
     if !valid_name(&definition.name) || definition.version.trim().is_empty()
         || !matches!(definition.category.as_str(), "common" | "game")
         || (definition.category == "game" && definition.game_id.as_deref().unwrap_or("").is_empty()) {
