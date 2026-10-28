@@ -14,7 +14,7 @@ pub(crate) fn record_uses_on(db: &rusqlite::Connection, task: &TaskContext, note
 pub fn search_for_task(app: &tauri::AppHandle, task: &TaskContext, terms: &[String], cancelled: &std::sync::atomic::AtomicBool) -> Result<Value, String> {
     let project = storage::read(app, &task.mod_id)?;
     // 资料文件哈希先读取，避免将磁盘 I/O 放在 SQLite 写事务内。
-    let references = super::references(app, &project.game_skill_name)?;
+    let references = super::references_for_task(app, task)?;
     let mut db = database::connect(app)?;
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
     super::repository::ensure_running_on(&tx, task, cancelled)?;

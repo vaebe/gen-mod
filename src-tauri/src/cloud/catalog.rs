@@ -32,12 +32,16 @@ async fn fetch(client:&super::auth::AuthClient)->Result<Catalog,String>{
     let skills=serde_json::from_slice(&client.get("/skills").await?).map_err(|_|"Skill 目录响应无效")?;
     Ok(Catalog{games,skills})
 }
-pub async fn confirm_on(root:&Path,catalog:&Catalog,game_ids:&[String],file_ids:&[String],client:&super::auth::AuthClient)->Result<(),String>{
-    let games:Vec<Game>=game_ids.iter().map(|id|catalog.games.iter().find(|game|&game.id==id).cloned().ok_or_else(||"游戏目录已变化，请重新检查".to_string())).collect::<Result<_,_>>()?;
+pub(super) async fn downloads(catalog:&Catalog,file_ids:&[String],client:&super::auth::AuthClient)->Result<Vec<(Skill,Version,Vec<u8>)>,String>{
     let mut selected=vec![];
-    for id in file_ids {let pair=catalog.skills.iter().find_map(|skill|skill.versions.iter().find(|version|&version.file_id==id).map(|version|(skill,version))).ok_or("版本目录已变化，请重新检查")?;selected.push(pair);}
-    // 用户已确认这批游戏与版本；每个版本仅在下载校验成功后单独登记。
-    for (skill,version) in selected {let bytes=client.get(&format!("/files/{}",version.file_id)).await?;official::install_on(root,skill,version,&bytes)?;}
+    for id in file_ids {let pair=catalog.skills.iter().find_map(|skill|skill.versions.iter().find(|version|&version.file_id==id).map(|version|(skill.clone(),version.clone()))).ok_or("版本目录已变化，请重新检查")?;selected.push(pair);}
+    let mut result=vec![];
+    for (skill,version) in selected {let bytes=client.get(&format!("/files/{}",version.file_id)).await?;result.push((skill,version,bytes));}
+    Ok(result)
+}
+pub(super) fn apply_on(root:&Path,catalog:&Catalog,game_ids:&[String],downloads:Vec<(Skill,Version,Vec<u8>)>)->Result<(),String>{
+    let games:Vec<Game>=game_ids.iter().map(|id|catalog.games.iter().find(|game|&game.id==id).cloned().ok_or_else(||"游戏目录已变化，请重新检查".to_string())).collect::<Result<_,_>>()?;
+    for (skill,version,bytes) in downloads {official::install_on(root,&skill,&version,&bytes)?;}
     official::confirm_games_on(root,games)
 }
 #[tauri::command]
@@ -50,7 +54,16 @@ pub async fn cloud_confirm_updates(app:tauri::AppHandle,game_ids:Vec<String>,fil
     let state=app.state::<super::auth::CloudState>();let _guard=state.0.lock().await;
     let client=super::auth::client(&app)?;let catalog=fetch(&client).await?;
     check_on(&official::root(&app)?,&catalog)?;
-    confirm_on(&official::root(&app)?,&catalog,&game_ids,&file_ids,&client).await
+    let packages=downloads(&catalog,&file_ids,&client).await?;
+    let worker_app=app.clone();
+    tauri::async_runtime::spawn_blocking(move||{
+        let storage=worker_app.state::<crate::storage::mods::StorageState>();let _storage=storage.0.lock().map_err(|_|"项目存储锁异常")?;
+        apply_on(&official::root(&worker_app)?,&catalog,&game_ids,packages)?;
+        for project in crate::storage::repository::list(&worker_app)? {
+            crate::storage::repository::update(&worker_app,&project.mod_id,|project|crate::skills::registry::refresh_sessions(&worker_app,project))?;
+        }
+        Ok(())
+    }).await.map_err(|error|error.to_string())?
 }
 #[tauri::command]
 pub fn cloud_games(app:tauri::AppHandle)->Result<Vec<Game>,String>{super::auth::require_local(&app)?;Ok(official::confirmed_on(&official::root(&app)?)?.games)}

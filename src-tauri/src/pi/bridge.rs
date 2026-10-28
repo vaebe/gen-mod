@@ -497,7 +497,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
         // 两种会话选择参数互斥；没有历史文件时才按 ID 创建或查找。
         command.args(["--session-id", session_id]);
     }
-    for view in crate::skills::registry::resolve(app, &project.game_skill_name)? {
+    for view in crate::skills::registry::resolve_for_game(app, &project.game_id)? {
         command.arg("--skill").arg(std::path::Path::new(&view.definition.path).join("SKILL.md"));
     }
     command.args(["--provider", &config.provider, "--model", &config.model])
@@ -760,7 +760,7 @@ fn session_selected(app: &tauri::AppHandle, mod_id: &str, requested: Option<&str
         return Ok(id.into());
     }
     let id = new_id.map(str::to_owned).unwrap_or_else(||uuid::Uuid::new_v4().to_string());
-    let skills = crate::skills::registry::snapshots(&crate::skills::registry::resolve(app, &project.game_skill_name)?);
+    let skills = crate::skills::registry::snapshots(&crate::skills::registry::resolve_for_game(app, &project.game_id)?);
     crate::storage::repository::update(app,mod_id,|project| {
         project.sessions.push(SessionReference { session_id: id.clone(), session_file: String::new(), skills, read_only: false, name: String::new() }); Ok(())
     })?;
@@ -1042,8 +1042,10 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
     let task_id = uuid::Uuid::new_v4().to_string();
     let staging_id = uuid::Uuid::new_v4().to_string();
     let task_directory = directory.join("logs").join(&task_id);
+    let task_skills = crate::skills::registry::resolve_for_game(&app, &project.game_id)?;
     let staging = task_directory.join("staging").join(&staging_id);
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    crate::skills::registry::pin_task_on(&task_directory,&task_skills)?;
     let mut context = TaskContext { task_id, mod_id: mod_id.clone(), session_id: id.clone(), generation: inner.generation + 1, source_directory: directory.join("source").to_string_lossy().into_owned(), staging_id, staging_directory: staging.to_string_lossy().into_owned(), created_at: mods::now()?, context_snapshot_id: None, memory_bootstrap_path: None, memory_bootstrap_sha256: None };
     let (snapshot,mut task)={
         let mut db=crate::storage::database::connect(&app)?;
@@ -1064,7 +1066,7 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
         persist_task(&app,&mut task)
     })();
     if let Err(error)=prepared {task.status="failed".into();persist_task(&app,&mut task)?;return Err(error);}
-    let exclusions: Vec<String> = crate::skills::registry::resolve(&app, &project.game_skill_name)?.iter().flat_map(|v| v.definition.exclude_paths.clone()).collect();
+    let exclusions: Vec<String> = task_skills.iter().flat_map(|v| v.definition.exclude_paths.clone()).collect();
     drop(_storage);
     drop(reservation);
     let lease_id = uuid::Uuid::new_v4().to_string();

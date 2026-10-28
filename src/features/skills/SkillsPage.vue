@@ -82,7 +82,7 @@ onMounted(refresh)
         <h1 class="text-xl font-semibold">
           Skills
         </h1><p class="mt-2 text-sm text-muted-foreground">
-          每个项目只加载所选游戏能力及其通用依赖。变更在下次新会话生效，旧会话保留为只读历史。
+          每个项目加载已启用的通用 Skill，以及绑定该游戏的 Skill。变更在下次新会话生效，旧会话保留为只读历史。
         </p>
       </div>
       <FieldError v-if="error">

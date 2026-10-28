@@ -7,9 +7,9 @@ pub mod usage;
 mod tests;
 use crate::storage::{database, repository as storage};
 use models::*;
-pub fn references(app: &tauri::AppHandle, skill: &str) -> Result<Vec<KnowledgeReference>, String> {
+pub fn references_for_task(app: &tauri::AppHandle, task: &crate::pi::tasks::TaskContext) -> Result<Vec<KnowledgeReference>, String> {
     let mut refs = vec![];
-    for view in crate::skills::registry::resolve(app, skill)? {
+    for view in crate::skills::registry::task_views(app, task)? {
         let root = std::path::Path::new(&view.definition.path);
         let dir = root.join("references");
         if !dir.is_dir() {

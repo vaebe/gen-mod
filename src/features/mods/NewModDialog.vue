@@ -18,15 +18,16 @@ const busy = shallowRef(false)
 const error = shallowRef('')
 const router = useRouter()
 const projects = useProjectsStore()
-const games = shallowRef<SkillView[]>([])
-const gameSkill = shallowRef('')
+const games = shallowRef<{ id: string, name: string, description: string }[]>([])
+const gameId = shallowRef('')
 watch(open, async (value) => {
   if (!value) {
     return
   }
   try {
-    games.value = (await nativeCall<SkillView[]>('list_skills')).filter(v => v.category === 'game' && v.enabled && !v.error)
-    gameSkill.value = games.value[0]?.name ?? ''
+    const [synced, skills] = await Promise.all([nativeCall<{ id: string, name: string, description: string }[]>('cloud_games'), nativeCall<SkillView[]>('list_skills')])
+    games.value = synced.filter(game => skills.some(skill => skill.source === 'official' && skill.category === 'game' && skill.gameId === game.id && skill.enabled && !skill.error))
+    gameId.value = games.value[0]?.id ?? ''
   }
   catch (cause) { error.value = (cause as Error).message }
 })
@@ -35,7 +36,7 @@ async function create(): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    const project = await modService.create(name.value, gameSkill.value, requirement.value)
+    const project = await modService.create(name.value, gameId.value, requirement.value)
     projects.upsert(project)
     open.value = false
     name.value = ''
@@ -66,17 +67,17 @@ async function create(): Promise<void> {
           </Field>
           <Field :data-disabled="busy">
             <FieldLabel for="game-skill">
-              游戏能力
+              游戏
             </FieldLabel>
-            <Select v-model="gameSkill" :disabled="busy">
+            <Select v-model="gameId" :disabled="busy">
               <SelectTrigger id="game-skill" class="w-full min-w-0" aria-describedby="game-skill-help">
-                <SelectValue placeholder="请选择游戏能力">
-                  <span class="truncate">{{ gameSkill }}</span>
+                <SelectValue placeholder="请选择游戏">
+                  <span class="truncate">{{ gameId }}</span>
                 </SelectValue>
               </SelectTrigger>
               <SelectContent align="start" class="w-(--reka-select-trigger-width)">
                 <SelectGroup>
-                  <SelectItem v-for="game in games" :key="game.name" :value="game.name" :text-value="game.name" class="items-start py-3 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1">
+                  <SelectItem v-for="game in games" :key="game.id" :value="game.id" :text-value="game.name" class="items-start py-3 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1">
                     <div class="min-w-0 space-y-1 whitespace-normal">
                       <p class="break-all font-medium">
                         {{ game.name }}
@@ -110,7 +111,7 @@ async function create(): Promise<void> {
           <Button type="button" variant="outline" :disabled="busy" @click="open = false">
             取消
           </Button>
-          <Button type="submit" :disabled="busy || !name.trim() || !gameSkill">
+          <Button type="submit" :disabled="busy || !name.trim() || !gameId">
             {{ busy ? '正在创建…' : '创建项目' }}
           </Button>
         </div>

@@ -34,11 +34,11 @@ fn validate_name(name: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name: String, game_skill_name: String, requirement: String) -> Result<ModProject, String> {
+pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name: String, game_id: String, requirement: String) -> Result<ModProject, String> {
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
     let name = validate_name(&name)?;
-    let selected = crate::skills::registry::resolve(&app, &game_skill_name)?;
-    let game_id = selected.last().and_then(|v| v.definition.game_id.clone()).ok_or("能力缺少游戏标识")?;
+    let selected = crate::skills::registry::resolve_for_game(&app, &game_id)?;
+    let game_skill_name = selected.iter().find(|view|view.source=="official"&&view.definition.category=="game").ok_or("缺少官方游戏 Skill")?.definition.name.clone();
     let id = uuid::Uuid::new_v4().to_string();
     let root = paths::mods_root(&app)?;
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
@@ -79,9 +79,6 @@ pub fn get_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, mod_id:
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
     let mut project = read_project(&app, &mod_id)?;
     crate::skills::registry::refresh_sessions(&app, &mut project)?;
-    if let Ok(views) = crate::skills::registry::resolve(&app, &project.game_skill_name) {
-        if let Some(id) = views.last().and_then(|v| v.definition.game_id.clone()) { project.game_id = id; }
-    }
     Ok(project)
 }
 

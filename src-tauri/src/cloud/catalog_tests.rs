@@ -40,7 +40,7 @@ pub(super) fn sample()->Catalog {
     let worker=thread::spawn(move||{let(mut socket,_)=listener.accept().unwrap();let mut request=vec![];let mut byte=[0;1];while !request.ends_with(b"\r\n\r\n"){socket.read_exact(&mut byte).unwrap();request.push(byte[0]);}let request=String::from_utf8(request).unwrap();assert!(request.starts_with("GET /files/file-id "));assert!(request.to_lowercase().contains("authorization: bearer access"));let bytes=include_bytes!("fixtures/mod-workflow.zip");write!(socket,"HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",bytes.len()).unwrap();socket.write_all(bytes).unwrap();});
     let client=super::auth::AuthClient::new(config.path().to_owned(),url).unwrap();
     client.save(&serde_json::from_str(r#"{"accessToken":"access","refreshToken":"refresh","email":"a@b.c","role":"user"}"#).unwrap()).unwrap();
-    tauri::async_runtime::block_on(confirm_on(root.path(),&catalog,&[],&["file-id".into()],&client)).unwrap();worker.join().unwrap();
+    let packages=tauri::async_runtime::block_on(downloads(&catalog,&["file-id".into()],&client)).unwrap();apply_on(root.path(),&catalog,&[],packages).unwrap();worker.join().unwrap();
     assert_eq!(official::confirmed_on(root.path()).unwrap().versions.len(),1);
 }
 #[test] fn valid_zip_with_wrong_hash_is_not_registered(){

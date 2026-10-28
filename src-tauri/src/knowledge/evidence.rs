@@ -28,7 +28,7 @@ pub(crate) fn validate_command_on(db: &Connection, task: &TaskContext, source: &
 
 pub fn validate_sources(app: &tauri::AppHandle, task: &TaskContext, input: &SaveLongTermMemoryInput) -> Result<(), String> {
     if input.source_refs.is_empty() || input.source_refs.len() > 20 { return Err("记忆需要 1–20 项真实来源".into()); }
-    let project = storage::read(app, &task.mod_id)?;
+    storage::read(app, &task.mod_id)?;
     let db = database::connect(app)?;
     let mut unique = std::collections::BTreeSet::new();
     let mut versions = Vec::new();
@@ -41,7 +41,7 @@ pub fn validate_sources(app: &tauri::AppHandle, task: &TaskContext, input: &Save
         let version = match source.kind.as_str() {
             "reference" => {
                 if source.task_id.is_some() || source.session_id.is_some() { return Err("参考来源包含不适用的任务字段".into()); }
-                let references = super::references(app, &project.game_skill_name)?;
+                let references = super::references_for_task(app, task)?;
                 let reference = references.iter().find(|reference| reference.id == source.id).ok_or("参考资料已变化或不属于当前游戏")?;
                 if source.sha256.as_ref().is_some_and(|hash| hash != &reference.sha256) { return Err("参考资料指纹不一致".into()); }
                 crate::project_context::repository::snapshot_for_task_on(&db, &task.mod_id, &task.task_id)?.context.game_version.map(|value| value.value)

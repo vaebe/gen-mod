@@ -49,7 +49,7 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
         successful.push(receipt);
     }
     let mut requires_fresh_output = false;
-    for view in crate::skills::registry::resolve(app, &project.game_skill_name)? {
+    for view in crate::skills::registry::task_views(app, &task.context)? {
         requires_fresh_output |= !view.definition.required_command_scripts.is_empty();
         for script in &view.definition.required_command_scripts {
             let expected = checked_path(Path::new(&view.definition.path), script)?.canonicalize().map_err(|e| e.to_string())?;
@@ -99,7 +99,7 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
     if report.findings.iter().any(|f|f.level=="block"){return Err(format!("最终交付内容检查拒绝：{}；需要新任务",serde_json::to_string(&report).map_err(|e|e.to_string())?));}
     let cases:Vec<super::delivery_metadata::VerificationCase>=input.get("verificationCases").map(|v|serde_json::from_value(v.clone())).transpose().map_err(|e|e.to_string())?.unwrap_or_default();
     super::delivery_metadata::validate_cases(&cases)?;
-    let version = ArtifactVersion { version_id: uuid::Uuid::new_v4().to_string(), task_id: task.context.task_id.clone(), created_at: mods::now()?, skills: project.sessions.iter().find(|s| s.session_id == task.context.session_id).ok_or("任务会话缺失")?.skills.clone(), files: prepared, zip_sha256: file_hash(&zip_path)? };
+    let version = ArtifactVersion { version_id: uuid::Uuid::new_v4().to_string(), task_id: task.context.task_id.clone(), created_at: mods::now()?, skills: crate::skills::registry::snapshots(&crate::skills::registry::task_views(app,&task.context)?), files: prepared, zip_sha256: file_hash(&zip_path)? };
     let artifacts = project_root.join("artifacts");
     paths::reject_redirect(&artifacts)?;
     let temporary = tempfile::Builder::new().prefix(".register-").tempdir_in(&artifacts).map_err(|e| e.to_string())?;

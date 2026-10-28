@@ -19,7 +19,7 @@ pub struct SkillDefinition {
     pub inspection_file: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillView {
     #[serde(flatten)]

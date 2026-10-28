@@ -4,15 +4,14 @@ use sha2::{Digest, Sha256};
 use std::{collections::{BTreeMap, BTreeSet}, fs, path::{Path, PathBuf}};
 use tauri::Manager;
 
-pub fn builtin_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    if cfg!(debug_assertions) { Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills")) }
-    else { Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("skills")) }
-}
 fn user_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("skills"))
 }
 fn user_registry(app: &tauri::AppHandle) -> Result<UserRegistry, String> {
-    let file = user_root(app)?.join("registry.json");
+    user_registry_on(&user_root(app)?)
+}
+fn user_registry_on(root:&Path)->Result<UserRegistry,String>{
+    let file = root.join("registry.json");
     if !file.exists() { return Ok(UserRegistry::default()); }
     paths::reject_redirect(file.parent().ok_or("能力目录无效")?)?;
     paths::reject_redirect(&file)?;
@@ -103,47 +102,49 @@ pub(crate) fn validate(definition: &SkillDefinition, root: &Path) -> Result<(Str
     }
     Ok((format!("{:x}", hash.finalize()), scripts))
 }
-pub fn list(app: &tauri::AppHandle) -> Result<Vec<SkillView>, String> {
-    let root = builtin_root(app)?;
-    let builtin: Vec<SkillDefinition> = serde_json::from_slice(&fs::read(root.join("registry.json")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    let user = user_registry(app)?;
-    let imported_root = user_root(app)?;
-    let mut names = BTreeSet::new();
-    let mut views = vec![];
-    for (definition, source, base) in builtin.into_iter().map(|d| (d, "builtin", root.clone())).chain(user.imported.into_iter().map(|d| (d, "user", imported_root.clone()))) {
-        if !names.insert(definition.name.clone()) { return Err(format!("重复的能力名称：{}", definition.name)); }
-        let relative = crate::changes::relative_path(&definition.path)?;
-        let directory = base.join(relative);
-        let (content_hash, scripts, error) = match validate(&definition, &directory) {
-            Ok((hash, scripts)) => (hash, scripts, None),
-            Err(error) => (String::new(), vec![], Some(error)),
+pub fn list_on(official_root:&Path,imported_root:&Path)->Result<Vec<SkillView>,String>{
+    let user=user_registry_on(imported_root)?;
+    let mut latest:BTreeMap<String,super::official::ConfirmedVersion>=BTreeMap::new();
+    for entry in super::official::available_on(official_root)? {
+        if latest.get(&entry.skill_id).is_none_or(|old|entry.version.uploaded_at>old.version.uploaded_at){latest.insert(entry.skill_id.clone(),entry);}
+    }
+    let mut definitions=vec![];
+    for entry in latest.into_values(){definitions.push((super::official::definition(official_root,&entry)?,"official".to_string(),Some(entry.version.content_hash)));}
+    for mut definition in user.imported {
+        definition.path=imported_root.join(crate::changes::relative_path(&definition.path)?).to_string_lossy().into_owned();
+        definitions.push((definition,"user".into(),None));
+    }
+    let mut names=BTreeSet::new();let mut views=vec![];
+    for (definition,source,expected) in definitions {
+        if !names.insert(definition.name.clone()){return Err(format!("重复的能力名称：{}",definition.name));}
+        let (content_hash,scripts,error)=match validate(&definition,Path::new(&definition.path)){
+            Ok((hash,scripts)) if expected.as_ref().is_none_or(|expected|*expected==hash)=>(hash,scripts,None),
+            Ok((hash,scripts))=>(hash,scripts,Some("本机官方 Skill 内容已变化".into())),
+            Err(error)=>(String::new(),vec![],Some(error)),
         };
-        let enabled = !user.disabled.contains(&definition.name);
-        let mut definition = definition;
-        definition.path = directory.to_string_lossy().into_owned();
-        views.push(SkillView { definition, source: source.into(), enabled, content_hash, scripts, error });
+        let enabled=!user.disabled.contains(&definition.name);
+        views.push(SkillView{definition,source,enabled,content_hash,scripts,error});
     }
-    Ok(views)
+    views.sort_by(|a,b|a.definition.name.cmp(&b.definition.name));Ok(views)
 }
-
-/// 仅解析所选游戏与其通用依赖，拒绝环和跨游戏的隐式加载。
-pub fn resolve(app: &tauri::AppHandle, name: &str) -> Result<Vec<SkillView>, String> {
-    let views = list(app)?;
-    let game = views.iter().find(|v| v.definition.name == name).ok_or("所选能力不存在")?;
-    if game.definition.category != "game" { return Err("项目必须选择游戏能力".into()); }
-    fn visit(name: &str, game: &str, views: &[SkillView], stack: &mut BTreeSet<String>, done: &mut BTreeSet<String>, out: &mut Vec<String>) -> Result<(), String> {
-        if done.contains(name) { return Ok(()); }
-        if !stack.insert(name.into()) { return Err(format!("能力依赖循环：{name}")); }
-        let view = views.iter().find(|v| v.definition.name == name).ok_or_else(|| format!("缺少依赖：{name}"))?;
-        if let Some(error) = &view.error { return Err(format!("能力 {name} 无效：{error}")); }
-        if !view.enabled { return Err(format!("能力已禁用：{name}")); }
-        if name != game && view.definition.category != "common" { return Err("游戏能力只能依赖通用能力".into()); }
-        for dependency in &view.definition.dependencies { visit(dependency, game, views, stack, done, out)?; }
-        stack.remove(name); done.insert(name.into()); out.push(name.into()); Ok(())
+pub fn list(app:&tauri::AppHandle)->Result<Vec<SkillView>,String>{list_on(&super::official::root(app)?,&user_root(app)?)}
+pub fn resolve_views_for_game(views:Vec<SkillView>,game_id:&str)->Result<Vec<SkillView>,String>{
+    let selected:Vec<_>=views.into_iter().filter(|view|view.enabled&&(view.definition.category=="common"||view.definition.game_id.as_deref()==Some(game_id))).collect();
+    for view in &selected {if let Some(error)=&view.error{return Err(format!("能力 {} 无效：{error}",view.definition.name));}}
+    if !selected.iter().any(|view|view.source=="official"&&view.definition.category=="game"&&view.definition.game_id.as_deref()==Some(game_id)){
+        return Err("请先确认下载并启用该游戏的官方游戏 Skill".into());
     }
-    let mut names = vec![];
-    visit(name, name, &views, &mut BTreeSet::new(), &mut BTreeSet::new(), &mut names)?;
-    Ok(names.into_iter().map(|n| views.iter().find(|v| v.definition.name == n).unwrap()).map(|v| SkillView { definition: v.definition.clone(), source: v.source.clone(), enabled: v.enabled, content_hash: v.content_hash.clone(), scripts: v.scripts.clone(), error: v.error.clone() }).collect())
+    Ok(selected)
+}
+pub fn resolve_for_game(app:&tauri::AppHandle,game_id:&str)->Result<Vec<SkillView>,String>{resolve_views_for_game(list(app)?,game_id)}
+pub fn pin_task_on(directory:&Path,views:&[SkillView])->Result<(),String>{mods::write_json(&directory.join("skills.json"),&views)}
+pub fn read_task_on(directory:&Path)->Result<Vec<SkillView>,String>{
+    paths::reject_redirect(directory)?;let path=directory.join("skills.json");paths::reject_redirect(&path)?;
+    serde_json::from_slice(&fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())
+}
+pub fn task_views(app:&tauri::AppHandle,context:&crate::pi::tasks::TaskContext)->Result<Vec<SkillView>,String>{
+    paths::validate_id(&context.task_id)?;
+    read_task_on(&paths::project_dir(app,&context.mod_id)?.join("logs").join(&context.task_id))
 }
 pub fn snapshots(views: &[SkillView]) -> Vec<SkillSnapshot> {
     views.iter().map(|v| SkillSnapshot { name: v.definition.name.clone(), version: v.definition.version.clone(), content_hash: v.content_hash.clone() }).collect()
@@ -151,11 +152,12 @@ pub fn snapshots(views: &[SkillView]) -> Vec<SkillSnapshot> {
 fn same(a: &[SkillSnapshot], b: &[SkillSnapshot]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.name == b.name && a.version == b.version && a.content_hash == b.content_hash)
 }
+pub fn refresh_snapshots(sessions:&mut [crate::storage::models::SessionReference], current:Option<&Vec<SkillSnapshot>>) {
+    for session in sessions {if current.is_none_or(|value|!same(&session.skills,value)){session.read_only=true;}}
+}
 pub fn refresh_sessions(app: &tauri::AppHandle, project: &mut crate::storage::models::ModProject) -> Result<(), String> {
-    let current = resolve(app, &project.game_skill_name).map(|v| snapshots(&v));
-    for session in &mut project.sessions {
-        if current.as_ref().map_or(true, |v| !same(&session.skills, v)) { session.read_only = true; }
-    }
+    let current = resolve_for_game(app, &project.game_id).map(|v| snapshots(&v));
+    refresh_snapshots(&mut project.sessions,current.as_ref().ok());
     Ok(())
 }
 

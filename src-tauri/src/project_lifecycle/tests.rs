@@ -148,3 +148,13 @@ fn unresolved_removals_block_writes_until_verified_recovery() {
     assert!(ensure_writable_on(&db,"p").is_err());
     assert!(ensure_writable_on(&db,"missing").is_err());
 }
+
+#[test]
+fn legacy_game_skill_name_does_not_replace_stored_game_id_and_missing_official_keeps_project_readable() {
+    let db=database();seed(&db,"legacy");
+    db.execute("UPDATE projects SET payload=json_set(payload,'$.gameSkillName','removed-legacy-skill') WHERE mod_id='legacy'",[]).unwrap();
+    let project=crate::storage::repository::read_on(&db,"legacy").unwrap();
+    assert_eq!(project.game_id,"duckov");assert_eq!(project.game_skill_name,"removed-legacy-skill");
+    assert!(crate::skills::registry::resolve_views_for_game(vec![],&project.game_id).is_err());
+    assert_eq!(crate::storage::repository::read_on(&db,"legacy").unwrap().game_id,"duckov");
+}

@@ -76,7 +76,7 @@ fn project_input(app: &tauri::AppHandle, mod_id: &str) -> Result<(PathBuf, Vec<S
     let root = paths::project_dir(app, mod_id)?.join("source");
     checked_path(&root, "", &[])?;
     let mut exclusions = vec![".delivery".into(), ".git".into()];
-    exclusions.extend(crate::skills::registry::resolve(app, &project.game_skill_name)?
+    exclusions.extend(crate::skills::registry::resolve_for_game(app, &project.game_id)?
         .into_iter().flat_map(|view| view.definition.exclude_paths));
     Ok((root, exclusions))
 }
@@ -311,7 +311,7 @@ fn recover_operation(project: &Path, item_id: &str, kind: &str, operation: &Sour
 pub fn reconcile(app: &tauri::AppHandle, mod_id: &str, item_id: &str, kind: &str, payload: &serde_json::Value) -> Result<(), String> {
     let operation: SourceOperation = serde_json::from_value(payload.clone()).map_err(|e| e.to_string())?;
     let project = mods::read_project(app, mod_id)?;
-    let exclusions: Vec<_> = crate::skills::registry::resolve(app, &project.game_skill_name)?.into_iter().flat_map(|view| view.definition.exclude_paths).collect();
+    let exclusions: Vec<_> = crate::skills::registry::resolve_for_game(app, &project.game_id)?.into_iter().flat_map(|view| view.definition.exclude_paths).collect();
     let status = recover_operation(&paths::project_dir(app, mod_id)?, item_id, kind, &operation, &exclusions).unwrap_or("requires_review");
     repository::file_operation(app, item_id, mod_id, kind, status, payload)
 }

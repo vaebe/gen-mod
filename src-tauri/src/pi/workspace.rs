@@ -182,15 +182,15 @@ fn hash(context: &super::tasks::TaskContext, path: &str) -> Result<Option<String
     changes::file_hash(&file).map(Some)
 }
 fn source_manifest(app: &tauri::AppHandle, context: &super::tasks::TaskContext) -> Result<BTreeMap<String,String>,String> {
-    let project=mods::read_project(app,&context.mod_id)?;
+    mods::read_project(app,&context.mod_id)?;
     let mut excludes=vec![".delivery".into()];
-    excludes.extend(crate::skills::registry::resolve(app,&project.game_skill_name)?.into_iter().flat_map(|s|s.definition.exclude_paths));
+    excludes.extend(crate::skills::registry::task_views(app,context)?.into_iter().flat_map(|s|s.definition.exclude_paths));
     changes::source_manifest(std::path::Path::new(&context.source_directory),&excludes)
 }
 fn fingerprint(app: &tauri::AppHandle, context: &super::tasks::TaskContext) -> Result<String,String> {
-    let project = mods::read_project(app,&context.mod_id)?;
+    mods::read_project(app,&context.mod_id)?;
     let mut excludes = vec![".delivery".into()];
-    excludes.extend(crate::skills::registry::resolve(app,&project.game_skill_name)?.into_iter().flat_map(|s|s.definition.exclude_paths));
+    excludes.extend(crate::skills::registry::task_views(app,context)?.into_iter().flat_map(|s|s.definition.exclude_paths));
     changes::source_fingerprint(std::path::Path::new(&context.source_directory),&excludes)
 }
 

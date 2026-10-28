@@ -14,30 +14,19 @@ pub async fn inspect_supported_game(
 ) -> Result<models::InspectionReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let project = storage::read(&app, &mod_id)?;
-        let views = crate::skills::registry::resolve(&app, &project.game_skill_name)?;
-        let view = views
-            .iter()
-            .find(|v| v.definition.name == project.game_skill_name)
-            .ok_or("游戏能力不存在")?;
-        let file = view
-            .definition
-            .inspection_file
-            .as_ref()
-            .ok_or("此游戏能力没有调查规则")?;
-        let path = crate::artifacts::registry::checked_path(
-            std::path::Path::new(&view.definition.path),
-            file,
-        )?;
-        let rules: models::InspectionRule =
-            serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-        scanner::validate_rules(&rules)?;
-        let profile = rules
-            .profiles
-            .iter()
-            .find(|p| p.kind == kind)
-            .ok_or("规则不支持此调查类型")?;
-        let mut report = scanner::scan_directory(std::path::Path::new(&directory), profile)?;
+        let views = crate::skills::registry::resolve_for_game(&app, &project.game_id)?;
+        let mut reports=vec![];
+        for view in views.iter().filter(|view|view.definition.category=="game") {
+            let Some(file)=&view.definition.inspection_file else {continue};
+            let path=crate::artifacts::registry::checked_path(std::path::Path::new(&view.definition.path),file)?;
+            let rules:models::InspectionRule=serde_json::from_slice(&std::fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+            scanner::validate_rules(&rules)?;
+            if let Some(profile)=rules.profiles.iter().find(|profile|profile.kind==kind){reports.push(scanner::scan_directory(std::path::Path::new(&directory),profile)?);}
+        }
+        let mut report=reports.into_iter().reduce(|mut combined,next|{combined.findings.extend(next.findings);combined.unknowns.extend(next.unknowns);combined.errors.extend(next.errors);combined.truncated|=next.truncated;combined}).ok_or("此游戏的已加载 Skill 没有对应调查规则")?;
+        report.findings.sort_by(|a,b|(&a.relative_path,&a.fact,&a.sha256).cmp(&(&b.relative_path,&b.fact,&b.sha256)));
+        report.findings.dedup_by(|a,b|a.relative_path==b.relative_path&&a.fact==b.fact&&a.sha256==b.sha256);
+        report.unknowns.sort();report.unknowns.dedup();
         report.report_id = uuid::Uuid::new_v4().to_string();
         report.mod_id = mod_id;
         report.game_id = project.game_id;
