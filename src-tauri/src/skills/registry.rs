@@ -39,7 +39,7 @@ pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64 && !name.starts_with('-') && !name.ends_with('-') && !name.contains("--")
         && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
-fn frontmatter(text: &str) -> Result<(String, String), String> {
+pub(super) fn frontmatter(text: &str) -> Result<(String, String), String> {
     let mut lines = text.lines();
     if lines.next() != Some("---") { return Err("SKILL.md 缺少 YAML frontmatter".into()); }
     let mut yaml = String::new();
