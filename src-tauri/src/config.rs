@@ -151,7 +151,7 @@ pub fn session_model_state(app: &tauri::AppHandle, selection: Option<ModelSelect
     result
 }
 
-fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("pi"))
 }
 
@@ -324,4 +324,12 @@ pub fn open_configuration_directory(app: tauri::AppHandle) -> Result<(), String>
     let root = directory(&app)?;
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     app.opener().open_path(root.to_string_lossy().into_owned(), None::<&str>).map_err(|e| e.to_string())
+}
+
+pub fn cloud_api_url(app: &tauri::AppHandle) -> Result<String, String> {
+ let state=app.state::<ConfigurationState>();let _guard=state.0.lock().map_err(|_|"配置锁异常")?;let (_,settings)=load(app)?;
+ Ok(settings.other.get("cloudApiUrl").and_then(|v|v.as_str()).unwrap_or("http://127.0.0.1:8787").into())
+}
+pub fn save_cloud_api_url(app: &tauri::AppHandle, url:&str) -> Result<(), String> {
+ let state=app.state::<ConfigurationState>();let _guard=state.0.lock().map_err(|_|"配置锁异常")?;let (_,mut settings)=load(app)?;settings.other.insert("cloudApiUrl".into(),serde_json::json!(url));let root=directory(app)?;fs::create_dir_all(&root).map_err(|e|e.to_string())?;crate::storage::mods::write_json(&root.join("settings.json"),&settings)
 }

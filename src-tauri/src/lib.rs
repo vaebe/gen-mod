@@ -1,3 +1,4 @@
+mod cloud;
 mod project_context;
 mod project_lifecycle;
 mod storage;
@@ -13,6 +14,7 @@ mod install;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(cloud::auth::CloudState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(storage::mods::StorageState::default())
@@ -21,7 +23,8 @@ pub fn run() {
         .manage(pi::workspace::Workspaces::default())
         .manage(install::installer::InstallState::default())
         .setup(|app| { storage::database::initialize(app.handle()).map_err(std::io::Error::other)?; Ok(()) })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler({ let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            cloud::auth::cloud_register,cloud::auth::cloud_login,cloud::auth::cloud_logout,cloud::auth::cloud_me,cloud::auth::cloud_configuration,
             project_lifecycle::set_mod_archived,project_lifecycle::list_archived_mods,project_lifecycle::delete_mod,
             knowledge::get_long_term_memory, knowledge::list_long_term_memories,
             knowledge::save_long_term_memory_entry, knowledge::set_long_term_memory_status,
@@ -55,7 +58,15 @@ pub fn run() {
             install::installer::preview_install, install::installer::install_version,
             files::pick_directory, files::open_mod_directory,
             files::export_version, files::open_task_logs,
-            artifacts::registry::delete_version])
+            artifacts::registry::delete_version];
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+                use tauri::Manager;
+                if !invoke.message.command().starts_with("cloud_") {
+                    if let Err(error)=cloud::auth::require_local(invoke.message.webview_ref().app_handle()) {invoke.resolver.reject(error);return true;}
+                }
+                handler(invoke)
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
