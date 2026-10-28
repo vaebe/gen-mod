@@ -202,14 +202,27 @@ pub fn set_skill_enabled(app: tauri::AppHandle, state: tauri::State<mods::Storag
     mods::write_json(&root.join("registry.json"), &user)
     })
 }
+pub(super) fn validate_import_on(definition:&SkillDefinition,source:&Path,official_root:&Path,imported_root:&Path)->Result<(),String>{
+    validate(definition,source)?;
+    let confirmed=super::official::confirmed_on(official_root)?;
+    if definition.category=="game"&&!confirmed.games.iter().any(|game|definition.game_id.as_deref()==Some(game.id.as_str())){
+        return Err("游戏 Skill 必须绑定已同步的官方游戏；导入不能创建游戏".into());
+    }
+    if super::official::catalog_on(official_root)?.skills.iter().any(|skill|skill.name==definition.name){
+        return Err("导入名称不能与官方 Skill 冲突".into());
+    }
+    if user_registry_on(imported_root)?.imported.iter().any(|skill|skill.name==definition.name)||imported_root.join(&definition.name).exists(){
+        return Err("导入名称已存在，不得覆盖已有导入".into());
+    }
+    Ok(())
+}
 #[tauri::command]
 pub fn import_skill(app: tauri::AppHandle, state: tauri::State<mods::StorageState>, directory: String, mut definition: SkillDefinition) -> Result<(), String> {
     crate::pi::bridge::while_idle(&app, || {
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
-    if list(&app)?.iter().any(|v| v.definition.name == definition.name) { return Err("名称已存在；内置能力不可覆盖，请使用不同名称".into()); }
     let root = PathBuf::from(directory);
     if !root.is_absolute() { return Err("请选择能力目录的绝对路径".into()); }
-    validate(&definition, &root)?;
+    validate_import_on(&definition,&root,&super::official::root(&app)?,&user_root(&app)?)?;
     let target_root = user_root(&app)?;
     fs::create_dir_all(&target_root).map_err(|e| e.to_string())?;
     paths::reject_redirect(&target_root)?;

@@ -18,7 +18,7 @@ export interface SkillDefinition {
   inspectionFile?: string
 }
 export interface SkillView extends SkillDefinition {
-  source: 'builtin' | 'user' | 'official'
+  source: 'user' | 'official'
   enabled: boolean
   contentHash: string
   scripts: string[]

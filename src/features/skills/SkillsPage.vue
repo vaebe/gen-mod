@@ -17,7 +17,7 @@ const skills = shallowRef<SkillView[]>([])
 const error = shallowRef('')
 const busy = shallowRef(false)
 const directory = shallowRef('')
-const metadata = shallowRef('{"name":"my-game-mod","description":"我的游戏 MOD 能力","category":"game","gameId":"my-game","version":"1.0.0","dependencies":["mod-workflow"],"path":"","excludePaths":[]}')
+const metadata = shallowRef('{"name":"my-local-skill","description":"本机导入的通用 Skill","category":"common","gameId":null,"version":"1.0.0","dependencies":[],"path":"","excludePaths":[]}')
 const session = useSessionStore()
 async function refresh(): Promise<void> {
   try {
@@ -114,7 +114,7 @@ onMounted(refresh)
                 </FieldLabel>
                 <Textarea id="skill-metadata" v-model="metadata" class="font-mono" :disabled="busy" rows="7" required aria-describedby="skill-import-help" />
                 <FieldDescription id="skill-import-help">
-                  目录需包含标准 SKILL.md。只校验并复制文件，不执行导入脚本；内置能力不可覆盖。
+                  目录需包含标准 SKILL.md。游戏 Skill 只能绑定已同步的官方游戏，名称不能与官方 Skill 或已有导入重复。只校验并复制，不执行脚本。
                 </FieldDescription>
               </Field><Button type="submit" class="self-start" :disabled="busy || session.anyBusy || !directory.trim()">
                 导入

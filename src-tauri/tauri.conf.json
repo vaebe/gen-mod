@@ -29,8 +29,7 @@
       "../runtime/resources/node-v22.19.0-win-x64/node.exe": "runtime/node-v22.19.0-win-x64/node.exe",
       "../runtime/resources/node-v22.19.0-win-x64/LICENSE": "runtime/node-v22.19.0-win-x64/LICENSE",
       "../runtime/resources/pi-portable-v1.1.0/": "runtime/pi-portable-v1.1.0/",
-      "../runtime/resources/resource-manifest.json": "runtime/resource-manifest.json",
-      "../skills/": "skills/"
+      "../runtime/resources/resource-manifest.json": "runtime/resource-manifest.json"
     },
     "targets": ["nsis"],
     "windows": {
