@@ -48,3 +48,12 @@ pub(super) fn sample()->Catalog {
     assert!(official::install_on(root.path(),&catalog.skills[0],&catalog.skills[0].versions[0],include_bytes!("fixtures/mod-workflow.zip")).unwrap_err().contains("哈希"));
     assert!(official::confirmed_on(root.path()).unwrap().versions.is_empty());
 }
+
+#[test] fn checking_catalog_waits_for_task_start_storage_lock(){
+    use std::sync::{Arc,Mutex,mpsc};
+    let root=tempfile::tempdir().unwrap();let lock=Arc::new(Mutex::new(()));let held=lock.lock().unwrap();
+    let (started_tx,started_rx)=mpsc::channel();let(done_tx,done_rx)=mpsc::channel();let path=root.path().to_owned();let worker_lock=lock.clone();
+    let worker=std::thread::spawn(move||{started_tx.send(()).unwrap();let result=check_locked_on(&worker_lock,&path,&sample());done_tx.send(result.is_ok()).unwrap();});
+    started_rx.recv().unwrap();assert!(done_rx.recv_timeout(std::time::Duration::from_millis(100)).is_err());assert!(!root.path().join("catalog.json").exists());
+    drop(held);assert!(done_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap());worker.join().unwrap();
+}

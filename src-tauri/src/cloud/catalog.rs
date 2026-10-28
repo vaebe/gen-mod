@@ -27,6 +27,10 @@ pub fn check_on(root:&Path,catalog:&Catalog)->Result<Updates,String>{
     official::save_catalog_on(root,catalog)?;official::save_confirmed_on(root,&confirmed)?;
     Ok(Updates{new_games,versions})
 }
+pub(super) fn check_locked_on(lock:&std::sync::Mutex<()>,root:&Path,catalog:&Catalog)->Result<Updates,String>{
+    let _guard=lock.lock().map_err(|_|"项目存储锁异常")?;
+    check_on(root,catalog)
+}
 async fn fetch(client:&super::auth::AuthClient)->Result<Catalog,String>{
     let games=serde_json::from_slice(&client.get("/games").await?).map_err(|_|"游戏目录响应无效")?;
     let skills=serde_json::from_slice(&client.get("/skills").await?).map_err(|_|"Skill 目录响应无效")?;
@@ -47,13 +51,13 @@ pub(super) fn apply_on(root:&Path,catalog:&Catalog,game_ids:&[String],downloads:
 #[tauri::command]
 pub async fn cloud_check_updates(app:tauri::AppHandle)->Result<Updates,String>{
     let state=app.state::<super::auth::CloudState>();let _guard=state.0.lock().await;
-    let catalog=fetch(&super::auth::client(&app)?).await?;check_on(&official::root(&app)?,&catalog)
+    let catalog=fetch(&super::auth::client(&app)?).await?;check_locked_on(&app.state::<crate::storage::mods::StorageState>().0,&official::root(&app)?,&catalog)
 }
 #[tauri::command]
 pub async fn cloud_confirm_updates(app:tauri::AppHandle,game_ids:Vec<String>,file_ids:Vec<String>)->Result<(),String>{
     let state=app.state::<super::auth::CloudState>();let _guard=state.0.lock().await;
     let client=super::auth::client(&app)?;let catalog=fetch(&client).await?;
-    check_on(&official::root(&app)?,&catalog)?;
+    check_locked_on(&app.state::<crate::storage::mods::StorageState>().0,&official::root(&app)?,&catalog)?;
     let packages=downloads(&catalog,&file_ids,&client).await?;
     let worker_app=app.clone();
     tauri::async_runtime::spawn_blocking(move||{

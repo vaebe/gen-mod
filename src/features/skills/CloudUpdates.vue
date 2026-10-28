@@ -15,7 +15,7 @@ const status = shallowRef('')
 const projects = useProjectsStore()
 async function check() {
   busy.value = true; error.value = ''; status.value = ''
-  try { updates.value = await nativeCall<Updates>('cloud_check_updates'); open.value = !!(updates.value.newGames.length || updates.value.versions.length); if (!open.value) { status.value = '官方目录已是最新' } }
+  try { updates.value = await nativeCall<Updates>('cloud_check_updates'); await projects.refresh(); open.value = !!(updates.value.newGames.length || updates.value.versions.length); if (!open.value) { status.value = '官方目录已是最新' } }
   catch (cause) { error.value = (cause as Error).message }
   finally { busy.value = false }
 }

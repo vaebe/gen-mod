@@ -71,7 +71,9 @@ pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name
 #[tauri::command]
 pub fn list_mods(app: tauri::AppHandle, state: tauri::State<StorageState>) -> Result<Vec<ModProject>, String> {
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
-    super::repository::list(&app)
+    let mut projects=super::repository::list(&app)?;
+    for project in &mut projects {crate::skills::registry::refresh_sessions(&app,project)?;}
+    Ok(projects)
 }
 
 #[tauri::command]
