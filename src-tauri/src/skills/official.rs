@@ -58,6 +58,7 @@ pub fn save_catalog_on(root: &Path, value: &Catalog) -> Result<(), String> {
 pub fn save_confirmed_on(root: &Path, value: &Confirmed) -> Result<(), String> {
     save(root, "confirmed.json", value)
 }
+#[cfg(test)]
 pub fn confirm_games_on(root: &Path, games: Vec<Game>) -> Result<(), String> {
     let mut confirmed = confirmed_on(root)?;
     for game in games {
@@ -115,6 +116,7 @@ pub fn available_on(root: &Path) -> Result<Vec<ConfirmedVersion>, String> {
         })
         .collect())
 }
+#[cfg(test)]
 pub fn install_on(
     root: &Path,
     skill: &Skill,

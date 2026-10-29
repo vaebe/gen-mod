@@ -37,6 +37,10 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "nat
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 
+# 完整调试符号会增加 LLVM 内存占用，开发构建关闭符号以避免内存不足。
+[profile.dev]
+debug = 0
+
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 16
