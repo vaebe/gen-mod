@@ -28,3 +28,6 @@ work/
 *.njsproj
 *.sln
 *.sw?
+.scratch
+/.grok/skills/
+/.agents/skills/

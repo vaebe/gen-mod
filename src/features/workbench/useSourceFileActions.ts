@@ -75,8 +75,8 @@ export function useSourceFileActions(readModId: () => string, invoke: SourceNati
     await execute('import_source_files', { targetDirectory, items }, acceptMutation)
   }
 
-  async function moveFile(source: string, targetDirectory: string, targetName: string): Promise<void> {
-    await execute('move_source_file', { source, targetDirectory, targetName }, acceptMutation)
+  async function moveFile(source: string, targetDirectory: string, targetName: string): Promise<SourceMutationResult | undefined> {
+    return execute('move_source_file', { source, targetDirectory, targetName }, acceptMutation)
   }
 
   async function createDirectory(parentDirectory: string, name: string) {

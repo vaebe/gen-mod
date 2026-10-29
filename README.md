@@ -33,6 +33,18 @@ Rust release 使用 Thin LTO 和 16 个代码生成单元，保留 `opt-level = 
 
 Node 分发仅包含 `node.exe` 和许可证；pi 保留运行依赖、类型声明及许可证，排除 source map，因此分发版本的依赖错误堆栈不能通过这些文件映射回原始源码。首次应用精简规则时，准备脚本将旧 pi 目录保留在 `work/pi-portable-before-slim-*`，再生成新目录与资源哈希清单。
 
+### GitHub Actions 与 Release 下载
+
+[Release Windows](.github/workflows/release-windows.yml) 在 Windows x64 runner 上沿用上述打包流程，使用 `package.json` 声明的 pnpm 版本和冻结锁文件安装依赖。工作流只生成 NSIS `.exe` 安装包，包含固定版本的 Node/pi 运行资源。
+
+- **正式发布**：先修改 `package.json` 的 `version`，提交需要发布的代码，再推送同版本 `v*` 标签，例如版本 `1.0.1` 对应标签 `v1.0.1`。版本不一致会在构建前失败；Rust 和 Tauri 版本仍由现有 `build:app` 脚本同步。
+- **下载入口**：标签构建成功后，工作流上传 `GenMod_<版本>_x64-setup.exe` 并自动公开 GitHub Release，用户可从仓库 **Releases → 对应版本 → Assets** 直接下载。带预发布标识的版本（例如 `1.0.1-beta.1`）会标记为 Pre-release。
+- **手动构建**：在 **Actions → Release Windows → Run workflow** 选择分支运行，从该次运行的 **Artifacts** 下载，保留 14 天。手动运行标签时也会发布该标签的 Release。
+
+发布使用 GitHub 自动提供的 `GITHUB_TOKEN`，工作流需要 `contents: write` 权限，无需配置个人 Token。新 Release 在安装包上传成功后才公开；失败时已有草稿保留，重跑会替换同名安装包附件。仓库可见性决定 Release 的访问范围，面向所有人下载时仓库须为公开仓库。安装包沿用现有配置，未添加 Windows 代码签名或自动更新。
+
+实现参考 [Orbit 的发布工作流](https://github.com/ErKeLost/Orbit/blob/main/.github/workflows/release.yml)，本项目保留 pnpm 和现有 Windows 构建入口。此工作流尚未在 GitHub 执行，首次发布仍需核对 Actions 结果、Release 附件与实际安装行为。
+
 ## 模型配置
 
 在设置页点击“添加 provider”，通过弹窗填写名称、唯一 ID、Base URL、API 协议和 API Key；在同一弹窗添加模型 ID、显示名称、上下文长度、最大输出以及图片输入和推理能力。模型参数按服务商规格填写。支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Generative AI。

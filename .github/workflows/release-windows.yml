@@ -1,0 +1,122 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Resolve version and validate tag
+        id: package
+        run: |
+          $package = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
+          $config = Get-Content -LiteralPath src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $version = $package.version
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+            throw 'package.json version is invalid'
+          }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME must match package.json version v$version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "installer=build-output/$($config.productName)_${version}_x64-setup.exe" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Set up pnpm from package.json
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+          cache: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows-x64
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Prepare bundled Node and pi runtime
+        run: pnpm prepare:runtime
+
+      - name: Build NSIS installer
+        run: pnpm build:app
+
+      - name: Verify installer
+        env:
+          INSTALLER: ${{ steps.package.outputs.installer }}
+        run: |
+          $installer = Get-Item -LiteralPath $env:INSTALLER -ErrorAction Stop
+          if ($installer.Length -eq 0) {
+            throw 'The installer is empty'
+          }
+          Write-Host "Installer: $($installer.Name) ($($installer.Length) bytes)"
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: GenMod-windows-x64-${{ steps.package.outputs.version }}
+          path: ${{ steps.package.outputs.installer }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          INSTALLER: ${{ steps.package.outputs.installer }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $release = gh release view $tag --json isDraft
+          if ($LASTEXITCODE -eq 0) {
+            $isDraft = ($release | ConvertFrom-Json).isDraft
+          } else {
+            $releaseArgs = @('release', 'create', $tag, '--draft', '--verify-tag', '--title', "GenMod $tag", '--generate-notes')
+            if ($env:VERSION -match '^\d+\.\d+\.\d+-') {
+              $releaseArgs += '--prerelease'
+            }
+            gh @releaseArgs
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to create release' }
+            $isDraft = $true
+          }
+          # 先上传完整安装包再公开新 Release；重跑仅替换同名附件。
+          gh release upload $tag $env:INSTALLER --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to upload installer' }
+          if ($isDraft) {
+            gh release edit $tag --draft=false
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to publish release' }
+          }

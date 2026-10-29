@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SourceImportItem } from '@/contracts/source'
-import { ArrowRightLeft, FolderPlus, Maximize2, RefreshCw, Upload } from '@lucide/vue'
+import { FolderPlus, Maximize2, Pencil, RefreshCw, Upload } from '@lucide/vue'
 import { listen } from '@tauri-apps/api/event'
 import { computed, defineAsyncComponent, onScopeDispose, shallowRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
@@ -16,16 +16,14 @@ import SourceFilePreview from './SourceFilePreview.vue'
 import SourceFileTree from './SourceFileTree.vue'
 import { useSourceBrowser } from './useSourceBrowser'
 import { useSourceFileActions } from './useSourceFileActions'
+import { useSourceTreeActions } from './useSourceTreeActions'
 
 const props = defineProps<{ modId: string, revision: number, active: boolean, readOnly?: boolean }>()
-const SourceDirectoryDialog = defineAsyncComponent(() => import('./SourceDirectoryDialog.vue'))
 const LegacyAssetsRecovery = defineAsyncComponent(() => import('./LegacyAssetsRecovery.vue'))
 const legacyOpen = shallowRef(false)
 const legacyCount = shallowRef(0)
 const legacyError = shallowRef('')
 const enlarged = shallowRef(false)
-const directoryOpen = shallowRef(false)
-const directoryMode = shallowRef<'move' | 'create'>('move')
 const pending = shallowRef<SourceImportItem[]>([])
 const importDirectory = shallowRef('')
 const reviewOpen = shallowRef(false)
@@ -44,15 +42,20 @@ const blockedReason = computed(() => {
   return busy ? '当前项目有活动 AI 任务，请结束后操作文件。' : ''
 })
 const actions = useSourceFileActions(() => props.modId)
+const treeNativeActions = useSourceFileActions(() => props.modId)
+const { busy: treeBusy, error: treeError } = treeNativeActions
 const { busy, error: actionError, results } = actions
 const failures = computed(() => results.value.filter(item => item.status !== 'imported'))
-const disabled = computed(() => busy.value || selecting.value || !!blockedReason.value)
-const { rows, selected, directory, preview, previewLoading, previewError, rootLoading, rootError, toggle, select, selectDirectory, reveal, refresh, loadDirectory } = useSourceBrowser(props)
-const fileActions = [{ kind: 'import', label: '导入文件', icon: Upload }, { kind: 'move', label: '移动/改名', icon: ArrowRightLeft }, { kind: 'create', label: '新建文件夹', icon: FolderPlus }] as const
+const browser = useSourceBrowser(props, true)
+const { rows, selected, focused, directory, preview, previewLoading, previewError, rootLoading, rootError, toggle, select, selectDirectory, reveal, refresh, loadDirectory } = browser
+const treeActions = useSourceTreeActions(props, browser, treeNativeActions, () => busy.value || treeBusy.value || selecting.value || !!blockedReason.value || !props.active)
+const { editing, editError, working } = treeActions
+const disabled = computed(() => busy.value || treeBusy.value || working.value || selecting.value || !!blockedReason.value || !props.active)
+const statusMessage = computed(() => blockedReason.value || [actionError.value, treeError.value, notice.value].filter(Boolean).join(' '))
+const fileActions = [{ kind: 'import', label: '导入文件', icon: Upload }, { kind: 'rename', label: '重命名', icon: Pencil }, { kind: 'create', label: '新建文件夹', icon: FolderPlus }] as const
 watch(() => props.modId, () => {
   generation++
   enlarged.value = false
-  directoryOpen.value = false
   legacyOpen.value = false
   legacyCount.value = 0
   legacyError.value = ''
@@ -110,17 +113,25 @@ async function importPending(): Promise<void> {
   await refresh()
 }
 
-async function perform(kind: 'import' | 'move' | 'create'): Promise<void> {
+async function perform(kind: 'import' | 'rename' | 'create', target = directory.value): Promise<void> {
   if (disabled.value) {
     return
   }
-  if (kind !== 'import') {
-    directoryMode.value = kind
-    directoryOpen.value = true
+  if (kind === 'create') {
+    await treeActions.beginCreate(target)
+    return
+  }
+  if (kind === 'rename') {
+    const entry = rows.value.find(row => row.path === focused.value)
+    if (entry) {
+      treeActions.beginRename(entry)
+    }
+    return
+  }
+  if (editing.value) {
     return
   }
   const current = generation
-  const target = directory.value
   selecting.value = true
   actionError.value = ''
   try {
@@ -149,20 +160,11 @@ function renamePending(index: number, value: string | number): void {
   pending.value = pending.value.map((item, itemIndex) => itemIndex === index ? { ...item, targetName: String(value) } : item)
 }
 
-async function moved(path: string): Promise<void> {
-  const current = generation
-  notice.value = `已移动到 source/${path}。`
-  await refresh()
-  if (current === generation) {
-    await reveal(path)
-  }
-}
-
 let disposed = false
 let unlisten: (() => void) | undefined
 void listen<{ modId: string, sourceRevision: number }>('project-source-changed', ({ payload }) => {
   // inactive 时由 useSourceBrowser 的 active watcher 在重新展示时刷新。
-  if (payload.modId === props.modId && props.active) {
+  if (payload.modId === props.modId && props.active && !working.value && !busy.value && !treeBusy.value) {
     void refresh()
   }
 }).then((stop) => {
@@ -204,7 +206,7 @@ function retry(path: string): void {
           <div class="flex items-center gap-1">
             <Tooltip v-for="action in fileActions" :key="action.kind">
               <TooltipTrigger as-child>
-                <span v-if="disabled || (action.kind === 'move' && !selected)" tabindex="0" :aria-label="action.label" class="inline-flex">
+                <span v-if="disabled || (action.kind === 'rename' && !focused) || (action.kind === 'import' && !!editing)" tabindex="0" :aria-label="action.label" class="inline-flex">
                   <Button variant="ghost" size="icon-sm" disabled :aria-label="action.label">
                     <component :is="action.icon" aria-hidden="true" />
                   </Button>
@@ -244,12 +246,12 @@ function retry(path: string): void {
           待处理 {{ pending.length }}
         </Button>
       </div>
-      <p v-if="blockedReason || actionError || notice" class="break-words px-3 py-2 text-xs text-muted-foreground" role="status">
-        {{ blockedReason || actionError || notice }}
+      <p v-if="statusMessage" class="break-words px-3 py-2 text-xs text-muted-foreground" role="status">
+        {{ statusMessage }}
       </p>
       <ResizablePanelGroup v-if="!enlarged" direction="vertical" class="min-h-0 flex-1">
         <ResizablePanel :default-size="40" :min-size="20">
-          <SourceFileTree class="h-full" :rows="rows" :selected="selected" :selected-directory="directory" :loading="rootLoading" :error="rootError" @select="select" @select-directory="selectDirectory" @toggle="toggle" @retry="retry" />
+          <SourceFileTree class="h-full" :rows="rows" :selected="focused" :loading="rootLoading" :error="rootError" editable :disabled="disabled" :editing="editing" :pending="working" :edit-error="editError" @select="select" @select-directory="selectDirectory" @toggle="toggle" @retry="retry" @focus="browser.focusEntry" @create="treeActions.beginCreate" @rename="treeActions.beginRename" @import="perform('import', $event)" @submit="treeActions.submit" @cancel="treeActions.cancel" @edit-name="treeActions.updateName" @move="treeActions.drop" />
         </ResizablePanel>
         <ResizableHandle with-handle />
         <ResizablePanel :default-size="60" :min-size="25">
@@ -267,7 +269,7 @@ function retry(path: string): void {
               <div class="flex items-center gap-1">
                 <Tooltip v-for="action in fileActions" :key="action.kind">
                   <TooltipTrigger as-child>
-                    <span v-if="disabled || (action.kind === 'move' && !selected)" tabindex="0" :aria-label="action.label" class="inline-flex">
+                    <span v-if="disabled || (action.kind === 'rename' && !focused) || (action.kind === 'import' && !!editing)" tabindex="0" :aria-label="action.label" class="inline-flex">
                       <Button variant="ghost" size="icon-sm" disabled :aria-label="action.label">
                         <component :is="action.icon" aria-hidden="true" />
                       </Button>
@@ -299,12 +301,12 @@ function retry(path: string): void {
               待处理 {{ pending.length }}
             </Button>
           </div>
-          <p v-if="blockedReason || actionError || notice" class="break-words px-4 py-2 text-xs text-muted-foreground" role="status">
-            {{ blockedReason || actionError || notice }}
+          <p v-if="statusMessage" class="break-words px-4 py-2 text-xs text-muted-foreground" role="status">
+            {{ statusMessage }}
           </p>
           <ResizablePanelGroup direction="horizontal" class="min-h-0 flex-1">
             <ResizablePanel :default-size="25" :min-size="15" :max-size="50">
-              <SourceFileTree class="h-full" :rows="rows" :selected="selected" :selected-directory="directory" :loading="rootLoading" :error="rootError" @select="select" @select-directory="selectDirectory" @toggle="toggle" @retry="retry" />
+              <SourceFileTree class="h-full" :rows="rows" :selected="focused" :loading="rootLoading" :error="rootError" editable :disabled="disabled" :editing="editing" :pending="working" :edit-error="editError" @select="select" @select-directory="selectDirectory" @toggle="toggle" @retry="retry" @focus="browser.focusEntry" @create="treeActions.beginCreate" @rename="treeActions.beginRename" @import="perform('import', $event)" @submit="treeActions.submit" @cancel="treeActions.cancel" @edit-name="treeActions.updateName" @move="treeActions.drop" />
             </ResizablePanel>
             <ResizableHandle with-handle />
             <ResizablePanel :default-size="75" :min-size="40">
@@ -313,7 +315,6 @@ function retry(path: string): void {
           </ResizablePanelGroup>
         </DialogContent>
       </Dialog>
-      <SourceDirectoryDialog v-model:open="directoryOpen" :mod-id="modId" :mode="directoryMode" :source="selected" :initial-directory="directory" :blocked-reason="blockedReason" @moved="moved" @created="refresh" />
       <Button v-if="legacyCount" variant="ghost" size="sm" :disabled="disabled" @click="legacyOpen = true">
         恢复旧素材（{{ legacyCount }}）
       </Button>

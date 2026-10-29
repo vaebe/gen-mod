@@ -20,6 +20,8 @@ pub struct SourceMutationResult { operation_id: String, source_revision: u64, it
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SourceOperation {
+    #[serde(default)]
+    directory: bool,
     operation_id: String,
     source_relative_path: Option<String>,
     target_relative_path: String,
@@ -178,7 +180,7 @@ fn import_reserved(app:&tauri::AppHandle,mod_id:&str,directory:&str,items:Vec<So
             if !original.is_absolute() { return Err("导入来源必须为文件选择器返回的绝对路径".into()); }
             io::validate_plain_file(original)?;
             let item_id = uuid::Uuid::new_v4().to_string();
-            let mut operation = SourceOperation { operation_id: operation_id.clone(), source_relative_path: None,
+            let mut operation = SourceOperation { directory: false, operation_id: operation_id.clone(), source_relative_path: None,
                 target_relative_path: relative, temporary_relative_path: Some(format!(".source-imports/{operation_id}/{item_id}.tmp")),
                 before_hash: None, result_hash: None, phase: "allocated".into() };
             journal(app, mod_id, &item_id, "source_import", "pending", &operation)?;
@@ -241,23 +243,29 @@ pub async fn move_source_file(app: tauri::AppHandle, mod_id: String, source: Str
         let (root, exclusions) = project_input(&app, &mod_id)?;
         let before = changes::source_fingerprint(&root, &exclusions)?;
         reservation.observe_fingerprint(before.clone())?;
+        if source.is_empty() { return Err("不能移动源码根目录".into()); }
         let original = checked_path(&root, &source, &exclusions)?;
-        io::validate_plain_file(&original)?;
+        let metadata = std::fs::symlink_metadata(&original).map_err(|e| e.to_string())?;
+        let directory = metadata.is_dir();
+        if !directory { io::validate_plain_file(&original)?; }
         let (relative, target) = target_path(&root, &target_directory, &target_name, &exclusions)?;
         if source.to_lowercase() == relative.to_lowercase() { return Err("同路径或仅修改大小写的改名暂不支持".into()); }
+        if directory && relative.to_lowercase().starts_with(&format!("{}/", source.to_lowercase())) {
+            return Err("不能将文件夹移动到自身或其子目录".into());
+        }
         let operation_id = uuid::Uuid::new_v4().to_string();
         let mut item = SourceMutationItem { source, target: relative.clone(), status: "conflict", message: None };
         if target.exists() { item.message = Some("目标已存在，请改名或跳过".into()); }
         else {
-            let hash = changes::file_hash(&original)?;
-            let mut operation = SourceOperation { operation_id: operation_id.clone(), source_relative_path: Some(item.source.clone()), target_relative_path: relative,
+            let hash = if directory { directory_fingerprint(&root, &item.source, Some(&relative), &exclusions)? } else { changes::file_hash(&original)? };
+            let mut operation = SourceOperation { directory, operation_id: operation_id.clone(), source_relative_path: Some(item.source.clone()), target_relative_path: relative,
                 temporary_relative_path: None, before_hash: Some(hash.clone()), result_hash: Some(hash), phase: "ready".into() };
             journal(&app, &mod_id, &operation_id, "source_move", "pending", &operation)?;
-            match io::move_no_replace(&original, &target) {
+            match io::move_entry_no_replace(&original, &target) {
                 Ok(()) => {
                     item.status = "moved";
                     operation.phase = "committed".into();
-                    if let Err(error) = journal(&app, &mod_id, &operation_id, "source_move", "done", &operation) { item.message = Some(format!("文件已移动，操作记录待恢复：{error}")); }
+                    if let Err(error) = journal(&app, &mod_id, &operation_id, "source_move", "done", &operation) { item.message = Some(format!("已移动，操作记录待恢复：{error}")); }
                 },
                 Err(error) => { item.status = if target.exists() { "conflict" } else { "failed" }; item.message = Some(error); },
             }
@@ -274,7 +282,7 @@ pub async fn create_source_directory(app: tauri::AppHandle, mod_id: String, pare
         let (relative, target) = target_path(&root, &parent_directory, &name, &exclusions)?;
         match std::fs::create_dir(&target) {
             Ok(()) => {},
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => { paths::reject_redirect(&target)?; },
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Err("同名文件或文件夹已存在".into()),
             Err(error) => return Err(error.to_string()),
         }
         let revision = reservation.observe_fingerprint(changes::source_fingerprint(&root, &exclusions)?)?;
@@ -283,11 +291,45 @@ pub async fn create_source_directory(app: tauri::AppHandle, mod_id: String, pare
     }).await.map_err(|e| e.to_string())?
 }
 
+// 目录指纹包含空目录及文件内容；同时核查移动前后的每个子项，防止绕过保留目录和链接限制。
+fn directory_fingerprint(root: &Path, relative: &str, destination: Option<&str>, exclusions: &[String]) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    let mut pending = vec![String::new()];
+    while let Some(suffix) = pending.pop() {
+        let join = |base: &str| if suffix.is_empty() { base.to_owned() } else { format!("{base}/{suffix}") };
+        let path = checked_path(root, &join(relative), exclusions)?;
+        if let Some(target) = destination { checked_path(root, &join(target), exclusions)?; }
+        let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        hasher.update(suffix.as_bytes());
+        hasher.update([0]);
+        if metadata.is_dir() {
+            hasher.update(b"directory\0");
+            let mut entries = std::fs::read_dir(&path).map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            entries.sort_by_key(|entry| entry.file_name());
+            for entry in entries {
+                let name = entry.file_name().into_string().map_err(|_| "文件名不是 UTF-8，无法移动目录")?;
+                pending.push(if suffix.is_empty() { name } else { format!("{suffix}/{name}") });
+            }
+        } else if metadata.is_file() && !suffix.is_empty() {
+            hasher.update(b"file\0");
+            hasher.update(changes::file_hash(&path)?.as_bytes());
+        } else { return Err("文件夹包含链接或特殊文件，不能移动".into()); }
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 fn recover_operation(project: &Path, item_id: &str, kind: &str, operation: &SourceOperation, exclusions: &[String]) -> Result<&'static str, String> {
     paths::validate_id(&operation.operation_id)?;
     let source = project.join("source");
     let target = checked_path(&source, &operation.target_relative_path, exclusions)?;
     let matches_hash = |path: &Path| -> Result<bool, String> {
+        if operation.directory {
+            if kind != "source_move" { return Err("目录操作类型无效".into()); }
+            let relative = path.strip_prefix(&source).map_err(|e| e.to_string())?.to_str().ok_or("目录路径不是 UTF-8")?.replace('\\', "/");
+            return Ok(operation.result_hash.as_ref() == Some(&directory_fingerprint(&source, &relative, None, exclusions)?));
+        }
         io::validate_plain_file(path)?;
         Ok(operation.result_hash.as_ref().is_some_and(|hash| changes::file_hash(path).as_ref().ok() == Some(hash)))
     };

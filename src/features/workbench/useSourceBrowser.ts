@@ -11,18 +11,43 @@ export interface SourceTreeRow extends SourceEntry {
 }
 
 /** 维护按目录加载的文件树；项目切换、刷新和卸载后丢弃旧请求。 */
-export function useSourceBrowser(props: { modId: string, revision: number, active: boolean }) {
+export function useSourceBrowser(props: { modId: string, revision: number, active: boolean }, rememberExpansion = false) {
   const directories = shallowRef<Record<string, SourceEntry[]>>({})
   const expanded = shallowRef(new Set<string>())
   const loading = shallowRef<Record<string, boolean>>({})
   const errors = shallowRef<Record<string, string>>({})
   const selected = shallowRef('')
+  const focused = shallowRef('')
   const directory = shallowRef('')
   const preview = shallowRef<SourcePreview>()
   const previewLoading = shallowRef(false)
   const previewError = shallowRef('')
   let generation = 0
   let selectionGeneration = 0
+
+  function readExpanded(modId: string): Set<string> {
+    if (!rememberExpansion || !modId) {
+      return new Set()
+    }
+    try {
+      const paths: unknown = JSON.parse(localStorage.getItem(`source-expanded:${modId}`) ?? '[]')
+      return new Set(Array.isArray(paths) ? paths.filter((path): path is string => typeof path === 'string') : [])
+    }
+    catch {
+      return new Set()
+    }
+  }
+
+  watch(expanded, (paths) => {
+    if (rememberExpansion && props.modId) {
+      try {
+        localStorage.setItem(`source-expanded:${props.modId}`, JSON.stringify([...paths]))
+      }
+      catch {
+        // 偏好无法保存时仍可浏览，本次展开状态保留在内存中。
+      }
+    }
+  }, { flush: 'sync' })
 
   const rows = computed(() => {
     const result: SourceTreeRow[] = []
@@ -71,6 +96,7 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
     const current = ++selectionGeneration
     const modId = props.modId
     selected.value = path
+    focused.value = path
     directory.value = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
     preview.value = undefined
     previewError.value = ''
@@ -98,10 +124,33 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
 
   function selectDirectory(path: string): void {
     directory.value = path
-    selected.value = ''
-    preview.value = undefined
-    previewError.value = ''
-    previewLoading.value = false
+    focused.value = path
+  }
+
+  function focusEntry(entry: SourceEntry): void {
+    focused.value = entry.path
+    directory.value = entry.kind === 'directory' ? entry.path : entry.path.split('/').slice(0, -1).join('/')
+  }
+
+  async function expandDirectory(path: string): Promise<void> {
+    const current = generation
+    const parts = path ? path.split('/') : []
+    expanded.value = new Set([...expanded.value, ...parts.map((_, index) => parts.slice(0, index + 1).join('/'))])
+    await loadDirectory('')
+    for (let index = 0; index < parts.length; index++) {
+      if (current !== generation) {
+        return
+      }
+      await loadDirectory(parts.slice(0, index + 1).join('/'))
+    }
+  }
+
+  function remapPaths(source: string, target: string): void {
+    const remap = (path: string) => path === source || path.startsWith(`${source}/`) ? target + path.slice(source.length) : path
+    expanded.value = new Set([...expanded.value].map(remap))
+    focused.value = remap(focused.value)
+    directory.value = remap(directory.value)
+    selected.value = remap(selected.value)
     selectionGeneration++
   }
 
@@ -119,61 +168,62 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
     await select(path)
   }
 
-  /** 文件夹首次展开时读取子项；收起后保留本次浏览缓存。 */
+  /** 展开时更新当前目录，收起后保留子分支的展开偏好。 */
   function toggle(path: string): void {
     const next = new Set(expanded.value)
     if (next.has(path)) {
-      // 收起时同时关闭子分支，避免刷新后保留尚未加载的展开状态。
-      for (const item of next) {
-        if (item === path || item.startsWith(`${path}/`)) {
-          next.delete(item)
-        }
-      }
+      next.delete(path)
     }
     else {
       next.add(path)
-      if (!directories.value[path]) {
-        void loadDirectory(path)
-      }
     }
     expanded.value = next
+    if (next.has(path)) {
+      const current = generation
+      void loadDirectory(path).then(() => reloadExpanded(path, current))
+    }
+  }
+
+  async function reloadExpanded(parent: string, current: number): Promise<void> {
+    for (const entry of directories.value[parent] ?? []) {
+      if (current !== generation) {
+        return
+      }
+      if (entry.kind === 'directory' && expanded.value.has(entry.path)) {
+        await loadDirectory(entry.path)
+        if (current === generation) {
+          await reloadExpanded(entry.path, current)
+        }
+      }
+    }
   }
 
   /** 刷新只重新读取已展开分支，保留当前选择并更新磁盘预览。 */
   async function refresh(): Promise<void> {
     const current = ++generation
-    directories.value = {}
     loading.value = {}
     errors.value = {}
     if (!props.modId || !props.active) {
       return
     }
     if (selected.value) {
+      const previousFocus = focused.value
+      const previousDirectory = directory.value
       void select(selected.value)
+      focused.value = previousFocus
+      directory.value = previousDirectory
     }
     await loadDirectory('')
-    async function reloadExpanded(parent: string): Promise<void> {
-      for (const entry of directories.value[parent] ?? []) {
-        if (current !== generation) {
-          return
-        }
-        if (entry.kind === 'directory' && expanded.value.has(entry.path)) {
-          await loadDirectory(entry.path)
-          if (current !== generation) {
-            return
-          }
-          await reloadExpanded(entry.path)
-        }
-      }
-    }
     if (current === generation) {
-      await reloadExpanded('')
+      await reloadExpanded('', current)
     }
   }
 
   watch(() => [props.modId, props.revision, props.active] as const, ([modId, , active], previous) => {
     if (modId !== previous?.[0]) {
-      expanded.value = new Set()
+      directories.value = {}
+      expanded.value = readExpanded(modId)
+      focused.value = ''
       selected.value = ''
       directory.value = ''
       preview.value = undefined
@@ -189,11 +239,11 @@ export function useSourceBrowser(props: { modId: string, revision: number, activ
       selectionGeneration += 1
       previewLoading.value = false
     }
-  }, { immediate: true })
+  }, { immediate: true, flush: 'sync' })
   onScopeDispose(() => {
     generation += 1
     selectionGeneration += 1
   })
 
-  return { rows, selected, directory, preview, previewLoading, previewError, rootLoading: computed(() => !!loading.value['']), rootError: computed(() => errors.value[''] ?? ''), toggle, select, selectDirectory, reveal, refresh, loadDirectory }
+  return { rows, selected, focused, directory, preview, previewLoading, previewError, rootLoading: computed(() => !!loading.value['']), rootError: computed(() => errors.value[''] ?? ''), toggle, select, selectDirectory, focusEntry, expandDirectory, remapPaths, reveal, refresh, loadDirectory }
 }

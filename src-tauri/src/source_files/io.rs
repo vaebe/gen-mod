@@ -29,6 +29,13 @@ pub fn validate_plain_file(path: &Path) -> Result<(), String> {
 
 pub fn move_no_replace(from: &Path, to: &Path) -> Result<(), String> {
     validate_plain_file(from)?;
+    move_entry_no_replace(from, to)
+}
+
+pub fn move_entry_no_replace(from: &Path, to: &Path) -> Result<(), String> {
+    for ancestor in from.ancestors() { crate::storage::paths::reject_redirect(ancestor)?; }
+    let metadata = std::fs::symlink_metadata(from).map_err(|e| e.to_string())?;
+    if !metadata.is_file() && !metadata.is_dir() { return Err("只能操作普通文件或文件夹".into()); }
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;

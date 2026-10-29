@@ -54,6 +54,7 @@ fn fixture_operation(root: &std::path::Path) -> (String, super::SourceOperation)
     let operation_id = uuid::Uuid::new_v4().to_string();
     let item_id = uuid::Uuid::new_v4().to_string();
     let operation = super::SourceOperation {
+        directory: false,
         operation_id: operation_id.clone(), source_relative_path: None, target_relative_path: "input.bin".into(),
         temporary_relative_path: Some(format!(".source-imports/{operation_id}/{item_id}.tmp")),
         before_hash: None, result_hash: None, phase: "allocated".into(),
@@ -111,6 +112,40 @@ fn move_recovery_preserves_conflicting_paths() {
     std::fs::write(&original, b"new user file").unwrap();
     assert_eq!(super::recover_operation(root.path(), &id, "source_move", &operation, &[]).unwrap(), "requires_review");
     assert_eq!(std::fs::read(original).unwrap(), b"new user file");
+}
+
+#[test]
+fn directory_move_preserves_contents_and_recovers_with_empty_directories() {
+    let root = tempfile::tempdir().unwrap();
+    let (id, mut operation) = fixture_operation(root.path());
+    let source = root.path().join("source");
+    let original = source.join("old");
+    let target = source.join("new");
+    std::fs::create_dir_all(original.join("empty")).unwrap();
+    std::fs::write(original.join("file.bin"), [0, 255, 10]).unwrap();
+    operation.directory = true;
+    operation.source_relative_path = Some("old".into());
+    operation.target_relative_path = "new".into();
+    operation.temporary_relative_path = None;
+    operation.phase = "ready".into();
+    operation.result_hash = Some(super::directory_fingerprint(&source, "old", Some("new"), &[]).unwrap());
+    assert_eq!(super::recover_operation(root.path(), &id, "source_move", &operation, &[]).unwrap(), "interrupted");
+    super::io::move_entry_no_replace(&original, &target).unwrap();
+    assert_eq!(std::fs::read(target.join("file.bin")).unwrap(), [0, 255, 10]);
+    assert_eq!(super::recover_operation(root.path(), &id, "source_move", &operation, &[]).unwrap(), "reconciled");
+    std::fs::remove_dir(target.join("empty")).unwrap();
+    assert_eq!(super::recover_operation(root.path(), &id, "source_move", &operation, &[]).unwrap(), "requires_review");
+}
+
+#[test]
+fn directory_move_rejects_existing_destination_and_reserved_descendants() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("old/cache")).unwrap();
+    std::fs::create_dir(root.path().join("new")).unwrap();
+    assert!(super::io::move_entry_no_replace(&root.path().join("old"), &root.path().join("new")).is_err());
+    assert!(root.path().join("old/cache").is_dir());
+    assert!(super::directory_fingerprint(root.path(), "old", Some("new"), &["old/cache".into()]).is_err());
+    assert!(super::directory_fingerprint(root.path(), "old", Some("new"), &["new/cache".into()]).is_err());
 }
 #[test]
 fn legacy_recovery_keeps_original_type_bytes_and_protects_changed_target(){
