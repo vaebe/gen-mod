@@ -109,3 +109,7 @@ pnpm tauri build
 ```
 
 真实 Responses 验收需用户补 Key；安装验收先使用隔离临时目录，不默认操作真实游戏目录。不签名、不上传、不发布。
+
+## 参考项目
+
+本项目参考了 [Orbit](https://github.com/ErKeLost/Orbit)。Orbit 是基于 Tauri 2 和 React 构建的 Pi 编程智能体桌面工作台，通过真实的 Pi RPC 和 SDK 提供会话与任务交互能力。
