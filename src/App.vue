@@ -3,6 +3,7 @@ import { defineAsyncComponent, onMounted, onUnmounted, shallowRef } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { nativeCall } from '@/services/native'
+import { cloudApiUrl } from '@/features/auth/config'
 import { authInvalidEvent, cloudUser } from '@/features/auth/state'
 import type { CloudUser } from '@/features/auth/state'
 const WorkbenchLayout = defineAsyncComponent(() => import('@/features/workbench/WorkbenchLayout.vue'))
@@ -13,7 +14,11 @@ const error = shallowRef('')
 function invalid() { cloudUser.value = null; error.value = ''; ready.value = true }
 async function refresh() {
   error.value = ''
-  try { cloudUser.value = await nativeCall<CloudUser>('cloud_me'); ready.value = true }
+  try {
+    await nativeCall('cloud_initialize', { apiUrl: cloudApiUrl })
+    cloudUser.value = await nativeCall<CloudUser>('cloud_me')
+    ready.value = true
+  }
   catch (cause) { if ((cause as Error).message.startsWith('CLOUD_AUTH_INVALID:')) { invalid() } else { error.value = (cause as Error).message } }
 }
 function authenticated(user: CloudUser) { cloudUser.value = user; ready.value = true }

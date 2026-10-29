@@ -53,18 +53,26 @@ impl AuthClient {
 pub fn client(app:&tauri::AppHandle)->Result<AuthClient,String>{AuthClient::new(crate::config::directory(app)?,crate::config::cloud_api_url(app)?)}
 pub fn require_local(app:&tauri::AppHandle)->Result<(),String>{load_tokens(&crate::config::directory(app)?).map(|_|())}
 #[tauri::command]
-pub fn cloud_configuration(app:tauri::AppHandle)->Result<String,String>{crate::config::cloud_api_url(&app)}
-#[tauri::command]
-pub async fn cloud_login(app:tauri::AppHandle,email:String,password:String,api_url:String)->Result<User,String>{
-    let state=app.state::<CloudState>();let _guard=state.0.lock().await;
-    let client=AuthClient::new(crate::config::directory(&app)?,api_url.clone())?;
-    let user=client.login(&email,&password,false).await?;crate::config::save_cloud_api_url(&app,&api_url)?;Ok(user)
+pub async fn cloud_initialize(app: tauri::AppHandle, api_url: String) -> Result<(), String> {
+    let state = app.state::<CloudState>();
+    let _guard = state.0.lock().await;
+    let client = AuthClient::new(crate::config::directory(&app)?, api_url.trim().into())?;
+    if crate::config::cloud_api_url(&app)?.trim_end_matches('/') != client.base_url {
+        // 切换 env 对应的服务时，旧令牌不能发送到新的 API。
+        client.clear()?;
+        crate::config::save_cloud_api_url(&app, &client.base_url)?;
+    }
+    Ok(())
 }
 #[tauri::command]
-pub async fn cloud_register(app:tauri::AppHandle,email:String,password:String,api_url:String)->Result<User,String>{
+pub async fn cloud_login(app:tauri::AppHandle,email:String,password:String)->Result<User,String>{
     let state=app.state::<CloudState>();let _guard=state.0.lock().await;
-    let client=AuthClient::new(crate::config::directory(&app)?,api_url.clone())?;
-    let user=client.login(&email,&password,true).await?;crate::config::save_cloud_api_url(&app,&api_url)?;Ok(user)
+    client(&app)?.login(&email,&password,false).await
+}
+#[tauri::command]
+pub async fn cloud_register(app:tauri::AppHandle,email:String,password:String)->Result<User,String>{
+    let state=app.state::<CloudState>();let _guard=state.0.lock().await;
+    client(&app)?.login(&email,&password,true).await
 }
 #[tauri::command]
 pub async fn cloud_me(app:tauri::AppHandle)->Result<User,String>{

@@ -6,6 +6,18 @@ Vue 3 + Tauri 2 的本地 AI MOD 工作台。使用 shadcn-vue、Tailwind CSS 4�
 
 UI 开发优先复用 `src/components/ui` 中的 shadcn-vue 组件，具体规范见 [项目协作规范](AGENTS.md) 和 [UI 组件约定](docs/project-context.md#ui-组件约定)。本次统一调整已完成限定文件的静态检查，尚未进行界面运行验收。
 
+## 账号与 API 环境
+
+业务 API 通过 Vite env 文件配置，变量为 `VITE_CLOUD_API_URL`。登录页不再选择环境或编辑服务地址；注册时填写邮箱、密码和确认密码，注册成功后自动登录。
+
+- 本地开发：`.env.development` 默认使用 `http://127.0.0.1:8787`，启动 gen-mod-admin API 后运行 `pnpm dev:app`。
+- 正式环境：将 `.env.production.example` 复制为 `.env.production`，替换实际 API 地址后运行 `pnpm build:app`。使用管理端同源代理时，地址应包含 `/api`；直接访问 API 时不加。
+- 本机覆盖：可使用 `.env.development.local` 或 `.env.production.local`，这些文件不会提交。
+
+未配置 `VITE_CLOUD_API_URL` 时默认请求本地 API。修改 env 后需要重启开发服务或重新打包。API 地址在检查登录状态前同步给原生端，账号、游戏与 Skill 请求使用同一地址；切换地址会清除旧登录凭证，保留本机项目与 Skill 文件。
+
+env 中只填写业务 API 地址，不填写七牛密钥或其他服务端凭据。模型服务配置仍使用设置页，与业务 API 环境独立。
+
 ## 开发准备
 
 Windows x64，Node >=22.19、pnpm 11.17、Rust 与 Tauri 的 Windows 编译环境。分发资源包含固定 Node 22.19.0 和 pi，普通用户无需全局 Node/pi。MOD 开发不要求安装对应游戏。
