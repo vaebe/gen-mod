@@ -1,14 +1,30 @@
 <script setup lang="ts">
+import type { Game } from '@/contracts/game'
 import type { ModProject } from '@/contracts/mod'
 import { ArrowUpRight, Folder, Plus } from '@lucide/vue'
-import { defineAsyncComponent, shallowRef } from 'vue'
+import { defineAsyncComponent, onMounted, shallowRef } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { nativeCall } from '@/services/native'
 import { useProjectsStore } from '@/stores/projects'
 import NewModDialog from './NewModDialog.vue'
 
 const projects = useProjectsStore()
+const GameIcon = defineAsyncComponent(() => import('./GameIcon.vue'))
+const games = shallowRef<Game[]>([])
+const gameError = shallowRef('')
+onMounted(async () => {
+  try {
+    games.value = await nativeCall<Game[]>('list_games')
+  }
+  catch (cause) {
+    gameError.value = (cause as Error).message
+  }
+})
+function gameName(project: ModProject): string {
+  return games.value.find(game => game.id === project.gameId)?.name || project.gameId || project.gameSkillName
+}
 const createOpen = shallowRef(false)
 const archivedOpen = shallowRef(false)
 const removing = shallowRef<ModProject>()
@@ -36,6 +52,9 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
       </header>
       <p v-if="projects.notice" role="status" class="mt-4 text-sm text-muted-foreground">
         {{ projects.notice }}
+      </p>
+      <p v-if="gameError" role="alert" class="mt-4 text-sm text-destructive">
+        游戏名称读取失败：{{ gameError }}
       </p>
       <p v-if="projects.error" role="alert" class="mt-8 text-sm text-destructive">
         {{ projects.error }}<Button variant="outline" size="sm" @click="projects.refresh">
@@ -65,7 +84,7 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
           <RouterLink :to="`/mods/${project.modId}/chat`" class="group flex flex-1 flex-col gap-4 rounded-lg pt-5 focus-visible:outline focus-visible:outline-ring">
             <CardHeader class="px-5 pt-0 pb-0">
               <div class="flex items-center gap-3">
-                <Folder class="size-4 shrink-0 text-muted-foreground" /><CardTitle class="min-w-0 truncate text-base">
+                <GameIcon :game-id="project.gameId" /><CardTitle class="min-w-0 truncate text-base">
                   {{ project.name }}
                 </CardTitle><ArrowUpRight class="ml-auto size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
               </div>
@@ -75,7 +94,7 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
               </CardDescription>
             </CardContent>
           </RouterLink><CardFooter class="justify-between gap-3 border-t bg-background/25 px-5 py-3 text-xs text-muted-foreground">
-            <span class="min-w-0"><span class="block truncate" :title="project.gameSkillName">{{ project.gameSkillName }}</span><span class="mt-1 block">{{ project.versions.length }} 个交付版本</span></span><Button variant="ghost" size="sm" class="text-muted-foreground" @click="removing = project">
+            <span class="min-w-0"><span class="block truncate" :title="gameName(project)">{{ gameName(project) }}</span><span class="mt-1 block">{{ project.versions.length }} 个交付版本</span></span><Button variant="ghost" size="sm" class="text-muted-foreground" @click="removing = project">
               移除
             </Button>
           </CardFooter>

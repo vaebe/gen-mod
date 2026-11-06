@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { SessionAction } from './SessionManageDialog.vue'
 import type { ModProject } from '@/contracts/mod'
-import { Folder, FolderOpen, MoreVertical, Pencil, Settings, Sparkles, Trash2 } from '@lucide/vue'
+import { Folder, MoreVertical, Pencil, Settings, Sparkles, Trash2 } from '@lucide/vue'
 import { defineAsyncComponent, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import SessionManageDialog from './SessionManageDialog.vue'
 import SessionRunIndicator from './SessionRunIndicator.vue'
 
 const projects = useProjectsStore()
+const GameIcon = defineAsyncComponent(() => import('../mods/GameIcon.vue'))
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
@@ -71,7 +72,7 @@ async function createSession(modId: string): Promise<void> {
         <SidebarMenu>
           <SidebarMenuItem v-for="project in projects.projects" :key="project.modId">
             <SidebarMenuButton :is-active="route.params.modId === project.modId" :aria-expanded="!collapsedProjects.has(project.modId)" :aria-controls="`project-sessions-${project.modId}`" :title="`${collapsedProjects.has(project.modId) ? '展开' : '收起'}${project.name}`" @click="toggleProject(project.modId)">
-              <Folder v-if="collapsedProjects.has(project.modId)" /><FolderOpen v-else /><span>{{ project.name }}</span>
+              <GameIcon :game-id="project.gameId" :expanded="!collapsedProjects.has(project.modId)" /><span>{{ project.name }}</span>
             </SidebarMenuButton>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
