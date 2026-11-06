@@ -90,7 +90,7 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
               </div>
             </CardHeader><CardContent class="flex-1 px-5 pb-5">
               <CardDescription class="line-clamp-2 min-h-12 text-sm leading-6">
-                {{ project.draftRequirement || '打开项目，继续描述你的需求。' }}
+                {{ project.description || '暂无描述' }}
               </CardDescription>
             </CardContent>
           </RouterLink><CardFooter class="justify-between gap-3 border-t bg-background/25 px-5 py-3 text-xs text-muted-foreground">

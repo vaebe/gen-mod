@@ -23,8 +23,8 @@ export const modService = {
   remove(modId: string, expectedRevision: number): Promise<DeleteProjectResult> {
     return nativeCall('delete_mod', { modId, expectedRevision })
   },
-  create(name: string, gameId: string, requirement: string): Promise<ModProject> {
-    return nativeCall('create_mod', { name, gameId, requirement })
+  create(name: string, gameId: string, description: string): Promise<ModProject> {
+    return nativeCall('create_mod', { name, gameId, description })
   },
   list(): Promise<ModProject[]> {
     return nativeCall('list_mods')

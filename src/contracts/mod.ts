@@ -34,6 +34,7 @@ export interface ModProject {
   name: string
   gameId: string
   gameSkillName: string
+  description: string
   draftRequirement: string
   updatedAt: string
   developmentStatus: 'draft' | 'generated' | 'running' | 'failed' | 'ready'

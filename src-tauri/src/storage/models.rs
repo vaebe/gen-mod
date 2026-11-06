@@ -90,6 +90,8 @@ pub struct ModProject {
     pub name: String,
     pub game_id: String,
     pub game_skill_name: String,
+    #[serde(default)]
+    pub description: String,
     pub draft_requirement: String,
     pub updated_at: String,
     pub development_status: DevelopmentStatus,

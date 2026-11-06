@@ -34,7 +34,7 @@ fn validate_name(name: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name: String, game_id: String, requirement: String) -> Result<ModProject, String> {
+pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name: String, game_id: String, description: String) -> Result<ModProject, String> {
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
     let name = validate_name(&name)?;
     crate::games::ensure_supported(&app, &game_id)?;
@@ -49,7 +49,8 @@ pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name
     let project = ModProject {
         mod_id: id, name, revision: 0, archived: false,
         game_id, game_skill_name,
-        draft_requirement: requirement, updated_at: now()?,
+        description: description.trim().to_string(),
+        draft_requirement: String::new(), updated_at: now()?,
         development_status: DevelopmentStatus::Draft, latest_version_id: None,
         last_deployment_directory: None,
         versions: vec![], installations: vec![], installed_targets: vec![], sessions: vec![],

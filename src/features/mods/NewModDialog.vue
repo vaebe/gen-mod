@@ -15,7 +15,7 @@ import { useProjectsStore } from '@/stores/projects'
 const GameCover = defineAsyncComponent(() => import('./GameCover.vue'))
 const open = defineModel<boolean>('open', { default: false })
 const name = shallowRef('')
-const requirement = shallowRef('')
+const description = shallowRef('')
 const busy = shallowRef(false)
 const error = shallowRef('')
 const router = useRouter()
@@ -72,11 +72,11 @@ async function create(): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    const project = await modService.create(name.value, gameId.value, requirement.value)
+    const project = await modService.create(name.value, gameId.value, description.value)
     projects.upsert(project)
     open.value = false
     name.value = ''
-    requirement.value = ''
+    description.value = ''
     await router.push(`/mods/${project.modId}/chat`)
   }
   catch (cause) { error.value = (cause as Error).message }
@@ -138,12 +138,12 @@ async function create(): Promise<void> {
           </Field>
           <Field :data-disabled="busy">
             <div class="flex items-center justify-between gap-2">
-              <FieldLabel for="mod-requirement">
-                你想做什么？
+              <FieldLabel for="mod-description">
+                MOD 描述
               </FieldLabel>
               <span class="text-xs text-muted-foreground">选填</span>
             </div>
-            <Textarea id="mod-requirement" v-model="requirement" class="min-h-32 resize-y leading-6" :disabled="busy" rows="4" placeholder="描述希望改变的行为、界面或规则…" />
+            <Textarea id="mod-description" v-model="description" class="min-h-32 resize-y leading-6" :disabled="busy" rows="4" placeholder="简要介绍这个 MOD 的用途和功能…" />
           </Field>
           <FieldError v-if="error" class="break-words">
             {{ error }}
