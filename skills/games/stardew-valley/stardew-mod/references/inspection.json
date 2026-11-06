@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "kind": "references",
+      "paths": [
+        { "relative": "StardewModdingAPI.dll", "fact": "referenceAssembly" },
+        { "relative": "Stardew Valley.dll", "fact": "referenceAssembly" },
+        { "relative": "StardewValley.GameData.dll", "fact": "referenceAssembly" },
+        { "relative": "MonoGame.Framework.dll", "fact": "referenceAssembly" },
+        { "relative": "xTile.dll", "fact": "referenceAssembly" },
+        { "relative": "SMAPI.Toolkit.CoreInterfaces.dll", "fact": "referenceAssembly" }
+      ]
+    },
+    {
+      "kind": "install",
+      "paths": [
+        { "relative": "StardewModdingAPI.dll", "fact": "referenceAssembly" },
+        { "relative": "Stardew Valley.dll", "fact": "referenceAssembly" },
+        { "relative": "StardewValley.GameData.dll", "fact": "referenceAssembly" },
+        { "relative": "MonoGame.Framework.dll", "fact": "referenceAssembly" },
+        { "relative": "xTile.dll", "fact": "referenceAssembly" },
+        { "relative": "smapi-internal/SMAPI.Toolkit.CoreInterfaces.dll", "fact": "referenceAssembly" },
+        { "relative": "Mods", "fact": "loaderMarker" }
+      ]
+    }
+  ]
+}

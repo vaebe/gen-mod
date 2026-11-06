@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>ExampleMod</AssemblyName>
+    <RootNamespace>ExampleMod</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DefaultItemExcludes>$(DefaultItemExcludes);.delivery/**;build/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <Target Name="RequireReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(ReferenceDirectory)' == ''" Text="需要独立的 ReferenceDirectory 参考程序集目录。" />
+  </Target>
+  <ItemGroup>
+    <Reference Include="$(ReferenceDirectory)/*.dll">
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="$(ReferenceDirectory)/smapi-internal/SMAPI.Toolkit.CoreInterfaces.dll" Condition="!Exists('$(ReferenceDirectory)/SMAPI.Toolkit.CoreInterfaces.dll') and Exists('$(ReferenceDirectory)/smapi-internal/SMAPI.Toolkit.CoreInterfaces.dll')">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

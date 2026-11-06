@@ -5,7 +5,7 @@ description: 当在 GenMod 为逃离鸭科夫（Duckov）新建、续改、排�
 
 # 逃离鸭科夫 MOD
 
-用于 Duckov C# MOD 开发。资料核对日期为 2026-10-10；网页中的成员是查找入口，新增调用须核对目标版本。先读[来源](references/api-sources.md)与[依赖及构建](references/dependencies.md)，再按任务读取专题。
+用于 Duckov 原生加载器的 C# MOD 开发，不默认采用 BepInEx 或第三方框架。核心上游资料已于 2026-11-06 重新核对；网页中的成员是查找入口，新增调用须核对目标版本。先读[来源](references/api-sources.md)与[依赖及构建](references/dependencies.md)，再按任务读取专题。
 
 ## 选择当前任务
 
@@ -13,6 +13,7 @@ description: 当在 GenMod 为逃离鸭科夫（Duckov）新建、续改、排�
 | --- | --- |
 | 新建或续改 | 检查 source 中的工程和改动，明确目标、验收场景、版本、依赖与缺项；只有新工程采用下方模板 |
 | 新 API、版本不符 | [API 查证](references/api-verification.md)：对象与触发时机 → 当前签名 → 保护条件和副作用 → 证据边界 |
+| 需要实际写法、从需求开始实现 | [功能配方](references/implementation-recipes.md)：悬浮 UI 完整入口、物品投递、数值效果、异步与资源的实现顺序 |
 | 物品、背包、角色、对话、本地化 | [游戏功能](references/gameplay.md) |
 | 生命周期、悬浮 UI、小地图、模型或资源 | [UI 与资源](references/ui-assets.md) |
 | 改原方法或补丁兼容 | [Harmony](references/harmony.md)；先判断公开 API/事件能否满足需求 |
@@ -20,6 +21,8 @@ description: 当在 GenMod 为逃离鸭科夫（Duckov）新建、续改、排�
 | 玩家反馈或切场景失效 | [排查与验收](references/troubleshooting.md)，先核对反馈对应的交付版本 |
 
 只读取当前任务需要的专题。复用仍适用的事实，查证发生变化的部分。路线优先已有配置/数据，再用公开 API/事件；确需 Harmony 时说明目标和原因。安装新前置需玩家授权。
+
+每项功能先确定触发入口、操作对象、所需 API/资源和可观察结果。直接采用已核对的配方结构；目标版本差异只查相关类型与调用链。缺少玩家获取、伤害、存档等接口依据时准确列出需要的符号或实现，不用看似合理的名称补齐代码。
 
 运行时游戏技能、参考资料与原始脚本只读。需求与环境事实按通用能力写入项目记忆，可复用开发知识保存长期记忆；不向本技能写开发笔记、猜测 API 或玩家私人信息。记忆只作参考，当前用户决定与已核对的目标版本优先。导入素材是 source 中的普通文件，不要求素材 ID 或格式转换。
 

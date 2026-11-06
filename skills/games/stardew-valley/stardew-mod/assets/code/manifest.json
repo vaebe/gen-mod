@@ -1,0 +1,11 @@
+{
+  "Name": "Example Mod",
+  "Author": "YourName",
+  "Version": "1.0.0",
+  "Description": "Replace with the actual implemented feature.",
+  "UniqueID": "YourName.ExampleMod",
+  "EntryDll": "ExampleMod.dll",
+  "MinimumApiVersion": "4.0.0",
+  "MinimumGameVersion": "1.6.0",
+  "UpdateKeys": []
+}

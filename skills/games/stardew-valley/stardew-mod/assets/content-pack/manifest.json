@@ -1,0 +1,11 @@
+{
+  "Name": "Example Content Pack",
+  "Author": "YourName",
+  "Version": "1.0.0",
+  "Description": "Replace with the actual implemented feature.",
+  "UniqueID": "YourName.ExampleContentPack",
+  "MinimumApiVersion": "4.1.10",
+  "MinimumGameVersion": "1.6.0",
+  "ContentPackFor": { "UniqueID": "Pathoschild.ContentPatcher", "MinimumVersion": "2.9.0" },
+  "UpdateKeys": []
+}

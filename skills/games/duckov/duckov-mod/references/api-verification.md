@@ -21,6 +21,22 @@
 
 反编译文本不包含完整 Unity 场景与序列化资源信息；仅有类定义无法确认某个 prefab 已绑定、对象始终存在或 UI 初始化顺序。
 
+## 已有 ILSpy CLI 时的最小查证
+
+只对当前功能相关、用户已提供的 DLL 操作，先看本机 `ilspycmd --help` 确认参数。以下是命令格式示例，替换参考目录；不要原样运行占位路径，也不为此自动安装工具：
+
+```powershell
+ilspycmd -l c '<ReferenceDirectory>/ItemStatsSystem.dll'
+ilspycmd -t 'ItemStatsSystem.Item' '<ReferenceDirectory>/ItemStatsSystem.dll'
+Get-FileHash -Algorithm SHA256 -LiteralPath '<ReferenceDirectory>/ItemStatsSystem.dll'
+```
+
+第一条列出该程序集的类；第二条读取单个类型，而不是反编译整个游戏；第三条用于区分同名 DLL 的不同版本。查找其他类型时先确定实际定义程序集，不能假定全部位于 TeamSoda.*。ILSpy 图形界面可对目标使用 Analyze 查看直接调用关系；CLI 类型输出本身不等于已经找齐调用者。
+
+把查证结果转成实现所需的短记录，例如“来源 DLL/hash → 完整类型 → 方法/重载 → 返回值 → 调用条件 → 所有权/副作用 → 尚缺证据”。编译报缺依赖时补齐对应合法参考目录，不向全仓批量反编译来碰运气。工具缺失时请求具体类型导出，已有官方示例足够的功能仍可继续。
+
+命令参数来源：[ILSpy CLI 源码](https://github.com/icsharpcode/ILSpy/blob/master/ICSharpCode.ILSpyCmd/IlspyCmdProgram.cs)，2026-11-06 核对；运行环境以本机版本为准。
+
 ## 使用网页示例时
 
 资料中的类型和签名是查找线索。先核对当前 DLL，再摘取最小调用方式，不整段搬运示例。尤其注意：

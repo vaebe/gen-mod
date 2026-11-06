@@ -17,7 +17,7 @@
     "description": "当在 GenMod 为逃离鸭科夫（Duckov）新建、续改、排查或交付 C# MOD 时使用。",
     "category": "game",
     "gameId": "duckov",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "dependencies": [
       "mod-workflow"
     ],
@@ -29,6 +29,18 @@
     "requiredCommandScripts": [
       "scripts/build.ps1"
     ],
+    "inspectionFile": "references/inspection.json"
+  },
+  {
+    "name": "stardew-mod",
+    "description": "当在 GenMod 为星露谷物语制作、续改或交付 Content Patcher 内容包或 SMAPI C# MOD 时使用。",
+    "category": "game",
+    "gameId": "stardew-valley",
+    "version": "1.1.0",
+    "dependencies": ["mod-workflow"],
+    "path": "games/stardew-valley/stardew-mod",
+    "excludePaths": ["bin", "obj"],
+    "requiredCommandScripts": ["scripts/build.ps1"],
     "inspectionFile": "references/inspection.json"
   }
 ]
