@@ -24,7 +24,7 @@ P1–P7 的历史实现和评估保存在[原执行记录](superpowers/plans/202
 - 项目目录：`D:\codetest\gen-mod`。Windows 桌面工具，通过 AI 生成和持续修改游戏 MOD。
 - Vue 3 + TypeScript + Vite 8 + Tauri 2；shadcn-vue + Tailwind CSS 4；Pinia、Vue Router、markstream-vue。图标使用现有 `@lucide/vue`，不要引入另一个图标包。
 - 当前使用 pnpm 11.17.0；参考 Orbit 的 pi 使用方式，不因 Orbit 使用 Bun 而切换包管理器。
-- 内置 Node 22.19.0 Windows x64 与 `@earendil-works/pi-coding-agent` 1.1.0。Agent 执行使用 RPC，SDK helper 仅用于只读历史投影。
+- 内置 Node 26.12.1 Windows x64 与 `@earendil-works/pi-coding-agent` 1.5.0。Agent 执行使用 RPC，SDK helper 仅用于只读历史投影。
 - 模型服务由用户在设置页弹窗配置，支持多个 provider 和模型；用户选择默认模型，不再固定 StepFun 或读取 `.env`。模型 ID、上下文、最大输出、图片输入和推理能力按服务商规格填写。
 - 游戏能力由通用 skills + 对应游戏 skills 扩展。优先逃离鸭科夫；不要在 Vue/Rust 中为每个游戏编写执行分支。
 - 开发项目不强制安装游戏。游戏内测试和效果验收由用户负责；构建需求、验证步骤、安装清单由 skills 规范。

@@ -243,8 +243,8 @@ fn status(app: &tauri::AppHandle, models: ModelsFile, settings: SettingsFile) ->
         model: settings.default_model.clone(), default_provider: settings.default_provider,
         default_model: settings.default_model, key_configured,
         configuration_directory: directory(app)?.to_string_lossy().into_owned(),
-        runtime_version: "1.1.0".into(), node_version: "22.19.0".into(),
-        runtime_prepared: root.join("node-v22.19.0-win-x64/node.exe").is_file() && root.join("pi-portable-v1.1.0/.deployment-complete").is_file(),
+        runtime_version: "1.5.0".into(), node_version: "26.12.1".into(),
+        runtime_prepared: root.join("node-v26.12.1-win-x64/node.exe").is_file() && root.join("pi-portable-v1.5.0/.deployment-complete").is_file(),
     })
 }
 

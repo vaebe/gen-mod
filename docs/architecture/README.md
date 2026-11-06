@@ -33,7 +33,7 @@ flowchart TB
     Bridge --> Registry
   end
   subgraph Runtime[内置 AI 运行时]
-    Pi[Node 22.19.0 / pi 1.1.0]
+    Pi[Node 26.12.1 / pi 1.5.0]
     Tools[文件工具 / run_command / prepare_delivery]
     Pi --> Tools
   end

@@ -21,7 +21,7 @@ if (process.platform !== lock.node.platform || process.arch !== lock.node.arch) 
   throw new Error(`当前锁文件仅支持 ${lock.node.platform}/${lock.node.arch}`);
 }
 mkdirSync(resources, { recursive: true });
-const archive = join(resources, "node.zip");
+const archive = join(resources, `${lock.node.directory}.zip`);
 if (!existsSync(archive)) {
   console.log(`下载固定 Node ${lock.node.version}…`);
   const response = await fetch(lock.node.url, { signal: AbortSignal.timeout(120_000) });

@@ -12,8 +12,8 @@ pub fn resources(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// 明确使用随应用分发的 Node，不回退到全局安装。
 pub fn command(app: &tauri::AppHandle, source: &std::path::Path, session_dir: &std::path::Path, config_dir: &std::path::Path) -> Result<Command, String> {
     let root = resources(app)?;
-    let node = root.join("node-v22.19.0-win-x64/node.exe");
-    let entry = root.join("pi-portable-v1.1.0/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
+    let node = root.join("node-v26.12.1-win-x64/node.exe");
+    let entry = root.join("pi-portable-v1.5.0/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
     if !node.is_file() || !entry.is_file() { return Err("内置运行时未准备，请执行 pnpm prepare:runtime".into()); }
     let mut command = Command::new(node);
     command.arg(entry).args(["--mode", "rpc", "--offline", "--no-approve", "--no-skills", "--no-extensions", "--no-mcp", "--no-prompt-templates", "--no-themes", "--no-context-files"]).arg("--session-dir").arg(session_dir)

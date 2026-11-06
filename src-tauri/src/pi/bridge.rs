@@ -506,7 +506,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
     if let Some(value) = task.as_mut() {
         value.context.generation = generation;
         command.env("GEN_MOD_TASK_CONTEXT", serde_json::to_string(&value.context).map_err(|e| e.to_string())?);
-        command.arg("--extension").arg(runtime::resources(app)?.join("pi-portable-v1.1.0/extensions/mod-tools.ts"))
+        command.arg("--extension").arg(runtime::resources(app)?.join("pi-portable-v1.5.0/extensions/mod-tools.ts"))
             .args(["--tools", "read,edit,write,grep,find,ls,run_command,prepare_delivery,read_project_context,read_project_memory_sources,update_project_memory,read_feedback_sources,propose_verification,search_game_knowledge,save_long_term_memory,read_game_inspection"]);
     } else {
         command.env_remove("GEN_MOD_TASK_CONTEXT").args(["--no-tools"]);

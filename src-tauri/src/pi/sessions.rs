@@ -36,9 +36,9 @@ pub fn read_session_history(app: tauri::AppHandle, mod_id: String, session_id: S
     let actual = file.canonicalize().map_err(|e| e.to_string())?;
     if !actual.starts_with(&sessions) { return Err("会话文件位于当前项目之外".into()); }
     let resources = super::runtime::resources(&app)?;
-    let helper = resources.join("pi-portable-v1.1.0/helpers/read-session.mjs");
+    let helper = resources.join("pi-portable-v1.5.0/helpers/read-session.mjs");
     if !helper.is_file() { return Err("历史读取资源尚未准备，请执行 pnpm prepare:runtime".into()); }
-    let mut command = Command::new(resources.join("node-v22.19.0-win-x64/node.exe"));
+    let mut command = Command::new(resources.join("node-v26.12.1-win-x64/node.exe"));
     command.arg(helper).arg(actual).arg(sessions).arg(directory.join("source"))
         .env_clear().env("PI_OFFLINE", "1").env("PI_TELEMETRY", "0")
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
