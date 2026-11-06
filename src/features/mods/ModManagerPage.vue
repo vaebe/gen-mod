@@ -168,10 +168,10 @@ async function deleteVersion(): Promise<void> {
         <span v-if="project" class="shrink-0 text-xs text-muted-foreground">{{ project.versions.length }} 个版本</span>
       </div>
       <div class="flex shrink-0 gap-1">
-        <Button size="sm" variant="outline" class="h-7 text-xs" :disabled="busy || !project" @click="action('source')">
+        <Button size="sm" variant="outline" :disabled="busy || !project" @click="action('source')">
           打开源码
         </Button>
-        <Button v-if="project" as-child size="sm" variant="ghost" class="h-7 text-xs">
+        <Button v-if="project" as-child size="sm" variant="ghost">
           <RouterLink :to="`/mods/${project.modId}/chat`">
             返回对话
           </RouterLink>
@@ -190,7 +190,7 @@ async function deleteVersion(): Promise<void> {
       <div class="flex shrink-0 items-start gap-2 rounded-lg border bg-muted/20 px-3 py-2">
         <Collapsible class="min-w-0 flex-1">
           <CollapsibleTrigger as-child>
-            <Button type="button" variant="ghost" size="sm" class="h-auto w-full justify-start whitespace-normal text-left">
+            <Button type="button" variant="ghost" size="sm" class="h-auto w-full justify-start whitespace-normal text-left text-sm">
               当前安装：{{ installationSummary }}
             </Button>
           </CollapsibleTrigger>

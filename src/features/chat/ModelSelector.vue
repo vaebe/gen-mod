@@ -18,7 +18,6 @@ const count = computed(() => props.providers.reduce((total, provider) => total +
 const currentExists = computed(() => props.providers.some(provider => provider.id === props.modelState?.selection.providerId && provider.models.some(model => model.id === props.modelState?.selection.modelId)))
 const canChoose = computed(() => count.value > 1 || (count.value === 1 && !currentExists.value))
 const previewLevel = computed(() => props.thinkingLevels[previewIndex.value] ?? props.thinkingLevel)
-const extendedThinking = computed(() => previewLevel.value === 'xhigh' || previewLevel.value === 'max')
 const progressWidth = computed(() => {
   const progress = previewIndex.value / Math.max(1, props.thinkingLevels.length - 1)
   return `calc(${progress * 100}% + ${36 - 36 * progress}px)`
@@ -58,7 +57,7 @@ function changeThinking(level?: ThinkingLevel): void {
   <div class="flex min-w-0 items-center rounded-full bg-muted/60">
     <DropdownMenu v-if="canChoose" v-model:open="modelOpen">
       <DropdownMenuTrigger as-child>
-        <Button variant="ghost" size="sm" class="h-8 min-w-0 gap-1.5 rounded-full px-3 text-xs" :disabled="disabled" aria-label="选择模型" :title="name">
+        <Button variant="ghost" size="sm" class="h-8 min-w-0 gap-1.5 rounded-full px-3" :disabled="disabled" aria-label="选择模型" :title="name">
           <span class="max-w-40 truncate">{{ name }}</span><ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
@@ -77,16 +76,16 @@ function changeThinking(level?: ThinkingLevel): void {
     <span v-else class="max-w-44 truncate px-3 py-1.5 text-xs" :title="name">{{ name }}</span>
     <Popover v-if="modelState?.definition?.reasoning && thinkingLevels.length" v-model:open="thinkingOpen">
       <PopoverTrigger as-child>
-        <Button variant="ghost" size="sm" class="h-8 gap-1 rounded-full pr-3 pl-2 text-xs text-muted-foreground" :disabled="thinkingDisabled" aria-label="选择思考强度">
+        <Button variant="ghost" size="sm" class="h-8 gap-1 rounded-full pr-3 pl-2 text-muted-foreground" :disabled="thinkingDisabled" aria-label="选择思考强度">
           <span>{{ labels[thinkingLevel] }}</span><ChevronDown class="size-3.5" />
         </Button>
       </PopoverTrigger>
       <PopoverContent side="top" align="end" :side-offset="8" class="w-80 max-w-[calc(100vw-2rem)]">
-        <div class="thinking-panel" :class="{ 'thinking-panel-extended': extendedThinking }">
+        <div>
           <div class="flex items-start justify-between gap-3">
             <Zap class="mt-1 size-4 text-muted-foreground" />
             <div class="min-w-0 text-center">
-              <p class="thinking-title text-lg font-semibold">
+              <p class="text-lg font-semibold text-primary">
                 {{ labels[previewLevel] }}
               </p>
               <p class="mt-0.5 truncate text-xs text-muted-foreground" :title="name">
@@ -98,9 +97,9 @@ function changeThinking(level?: ThinkingLevel): void {
             </Button>
           </div>
           <div v-if="thinkingLevels.length > 1" class="thinking-track relative mt-5 h-9 rounded-full bg-muted">
-            <div v-if="previewIndex > 0" class="thinking-fill pointer-events-none absolute inset-y-0 left-0 rounded-full" :style="{ width: progressWidth }" />
+            <div v-if="previewIndex > 0" class="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-primary" :style="{ width: progressWidth }" />
             <div class="pointer-events-none absolute inset-0 flex items-center justify-between px-[18px]">
-              <span v-for="(level, index) in thinkingLevels" :key="level" class="size-1.5 rounded-full" :class="index < previewIndex ? 'bg-white/45' : 'bg-muted-foreground/40'" />
+              <span v-for="(level, index) in thinkingLevels" :key="level" class="size-1.5 rounded-full" :class="index < previewIndex ? 'bg-primary-foreground/70' : 'bg-muted-foreground/70'" />
             </div>
             <input type="range" min="0" :max="thinkingLevels.length - 1" step="1" :value="previewIndex" :disabled="thinkingDisabled" class="thinking-slider relative h-full w-full cursor-pointer disabled:cursor-default" aria-label="模型思考强度" :aria-valuetext="labels[previewLevel]" @input="previewIndex = Number(($event.target as HTMLInputElement).value)" @change="changeThinking(previewLevel)">
           </div>
@@ -114,33 +113,6 @@ function changeThinking(level?: ThinkingLevel): void {
 </template>
 
 <style scoped>
-.thinking-panel {
-  --thinking-accent: #527cff;
-}
-.thinking-panel-extended {
-  --thinking-accent: #9852ff;
-}
-.thinking-title {
-  color: var(--thinking-accent);
-}
-.thinking-fill {
-  background: var(--thinking-accent);
-  transition: width 160ms ease;
-}
-.thinking-panel-extended .thinking-fill {
-  background:
-    radial-gradient(circle at 16% 35%, #ffffff80 0 1px, transparent 2px),
-    radial-gradient(circle at 63% 65%, #ffffff70 0 1px, transparent 2px), linear-gradient(100deg, #4845dc, #ad63ff);
-  background-size:
-    37px 100%,
-    53px 100%,
-    100% 100%;
-}
-@media (prefers-reduced-motion: reduce) {
-  .thinking-fill {
-    transition: none;
-  }
-}
 .thinking-track {
   box-shadow: inset 0 0 0 1px var(--border);
 }
@@ -159,7 +131,7 @@ function changeThinking(level?: ThinkingLevel): void {
   appearance: none;
   width: 36px;
   height: 36px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--primary);
   border-radius: 50%;
   background: var(--popover);
   cursor: grab;

@@ -79,13 +79,10 @@ onMounted(refresh)
   <section class="studio-page min-h-0">
     <div class="studio-content space-y-6">
       <header class="border-b pb-8">
-        <p class="studio-eyebrow">
-          SKILL LIBRARY
-        </p>
         <h1 class="studio-title">
-          创作能力
-        </h1><p class="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-          每个项目加载已启用的通用 Skill，以及绑定该游戏的 Skill。变更在下次新会话生效，旧会话保留为只读历史。
+          Skills
+        </h1><p class="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+          管理 AI 制作 MOD 时使用的通用能力与对应游戏能力。修改启用状态后，下次新会话生效；旧会话保留为只读历史。
         </p>
       </header>
       <FieldError v-if="error">
@@ -113,7 +110,7 @@ onMounted(refresh)
               </Field>
               <Field :data-disabled="busy">
                 <FieldLabel for="skill-metadata">
-                  应用能力元数据
+                  能力配置（JSON）
                 </FieldLabel>
                 <Textarea id="skill-metadata" v-model="metadata" class="font-mono" :disabled="busy" rows="7" required aria-describedby="skill-import-help" />
                 <FieldDescription id="skill-import-help">

@@ -94,20 +94,17 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="studio-page">
-    <div class="studio-content space-y-6">
-      <header class="border-b pb-8">
-        <p class="studio-eyebrow">
-          PREFERENCES
-        </p>
+  <section class="studio-page flex min-h-0 flex-col overflow-hidden">
+    <div class="studio-content flex min-h-0 flex-1 flex-col gap-6">
+      <header class="shrink-0 border-b pb-8">
         <h1 class="studio-title">
           设置
-        </h1><p class="mt-3 text-sm leading-6 text-muted-foreground">
+        </h1><p class="mt-2 text-sm leading-6 text-muted-foreground">
           管理模型服务和跨项目长期记忆。
         </p>
       </header>
-      <Tabs v-model="tab" class="flex flex-col gap-5">
-        <TabsList>
+      <Tabs v-model="tab" class="flex min-h-0 flex-1 flex-col gap-5">
+        <TabsList class="shrink-0">
           <TabsTrigger value="model">
             模型服务
           </TabsTrigger>
@@ -115,147 +112,152 @@ onMounted(() => {
             长期记忆
           </TabsTrigger>
         </TabsList>
-        <TabsContent v-show="tab === 'model'" value="model" force-mount class="flex flex-col gap-6">
-          <p v-if="error" role="alert" class="text-sm text-destructive">
-            {{ error }}
-          </p>
-          <p v-if="loading" role="status" class="text-sm text-muted-foreground">
-            正在读取配置…
-          </p>
-          <Button v-if="!status && !loading" variant="outline" @click="refresh">
-            重新读取
-          </Button>
-          <template v-if="status">
-            <fieldset :disabled="busy" class="min-w-0 overflow-hidden rounded-xl border bg-card">
-              <div class="flex items-center justify-between gap-4 border-b px-5 py-4">
-                <div>
-                  <h2 class="text-sm font-medium">
-                    模型服务 <span v-if="draft.providers.length" class="ml-1 text-muted-foreground">{{ draft.providers.length }}</span>
-                  </h2><p class="mt-1 text-xs text-muted-foreground">
-                    连接配置和模型统一在这里管理。
-                  </p>
-                </div><Button size="sm" :disabled="editing !== null" @click="editing = ''">
-                  添加 provider
-                </Button>
-              </div>
-              <Dialog :open="editing !== null" @update:open="!$event && (editing = null)">
-                <DialogContent class="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl" @pointer-down-outside.prevent @interact-outside.prevent>
-                  <DialogHeader class="shrink-0 border-b px-6 py-5 pr-12 text-left">
-                    <DialogTitle>{{ currentProvider ? '编辑 provider' : '添加 provider' }}</DialogTitle><DialogDescription>填写连接信息和模型，添加到列表后统一保存。</DialogDescription>
-                  </DialogHeader>
-                  <ProviderEditor v-if="editing !== null" :key="editing" :provider="currentProvider" :existing-ids="existingIds" @apply="apply" @cancel="editing = null" />
-                </DialogContent>
-              </Dialog>
-              <div class="divide-y">
-                <Empty v-if="!draft.providers.length">
-                  <EmptyHeader>
-                    <EmptyTitle>
-                      尚未添加模型服务
-                    </EmptyTitle><EmptyDescription>
-                      点击右上方“添加 provider”，填写服务地址、API Key 和模型信息。
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-                <article v-for="provider in draft.providers" :key="provider.id" class="p-5">
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <h3 class="font-medium">
-                        {{ provider.name }}
-                      </h3><p class="mt-1 break-all font-mono text-xs text-muted-foreground">
-                        {{ provider.id }}
-                      </p>
-                    </div><div class="flex gap-1">
-                      <Button variant="ghost" size="sm" @click="editing = provider.id">
-                        编辑
-                      </Button><Button variant="ghost" size="sm" class="text-destructive" @click="remove(provider.id)">
-                        移除
-                      </Button>
-                    </div>
-                  </div>
-                  <div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <span>{{ apiLabel(provider.api) }}</span><span>{{ provider.apiKey || provider.keyConfigured ? 'Key 已填写' : 'Key 未填写' }}</span><span class="break-all">{{ provider.baseUrl }}</span>
-                  </div>
-                  <ul class="mt-4 divide-y rounded-lg bg-muted/30 px-3 text-sm">
-                    <li v-for="model in provider.models" :key="model.id" class="flex flex-wrap items-center justify-between gap-2 py-3">
-                      <span>{{ model.name }} <span class="ml-2 font-mono text-xs text-muted-foreground">{{ model.id }}</span></span><span class="text-xs text-muted-foreground">{{ model.contextWindow.toLocaleString() }} 上下文 · {{ model.maxTokens.toLocaleString() }} 输出{{ model.input.includes('image') ? ' · 图片' : '' }}{{ model.reasoning ? ' · 推理' : '' }}</span>
-                    </li>
-                  </ul>
-                </article>
-              </div>
-              <FieldGroup class="border-t p-5">
-                <Field orientation="responsive" :data-disabled="busy || editing !== null">
-                  <FieldContent>
-                    <FieldLabel for="default-model">
-                      默认模型
-                    </FieldLabel><FieldDescription>
-                      用于后续新任务
-                    </FieldDescription>
-                  </FieldContent><FieldContent class="min-w-0 sm:flex-3">
-                    <Select v-if="modelOptions.length" v-model="defaultValue" :disabled="busy || editing !== null">
-                      <SelectTrigger id="default-model" class="w-full">
-                        <SelectValue placeholder="请选择默认模型" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem :value="JSON.stringify(['', ''])">
-                            请选择默认模型
-                          </SelectItem>
-                          <SelectItem v-for="option in modelOptions" :key="option.value" :value="option.value">
-                            {{ option.label }}
-                          </SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select><FieldDescription v-else>
-                      添加模型后可选择
-                    </FieldDescription><FieldDescription v-if="modelOptions.length">
-                      保存后下次任务生效，正在执行的任务不受影响。
-                    </FieldDescription>
-                  </FieldContent>
-                </Field>
-              </FieldGroup>
-              <div class="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-5 py-4">
-                <div class="text-xs">
-                  <span v-if="saved" role="status" class="text-green-700 dark:text-green-400">配置已保存</span><span v-else-if="dirty" class="text-muted-foreground">修改尚未保存</span><span v-else class="text-muted-foreground">{{ draft.providers.length ? '配置保存在本机' : '未配置时仍可保存需求和管理项目' }}</span>
-                </div><div class="ml-auto flex gap-2">
-                  <Button variant="outline" :disabled="!dirty && editing === null" @click="reset">
-                    放弃修改
-                  </Button><Button :disabled="!dirty || editing !== null || busy" @click="persist">
-                    {{ saving ? '保存中…' : '保存配置' }}
+        <TabsContent v-show="tab === 'model'" value="model" force-mount class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="min-h-0 flex-1 space-y-6 overflow-y-auto pb-6">
+            <p v-if="error && !status" role="alert" class="text-sm text-destructive">
+              {{ error }}
+            </p>
+            <p v-if="loading" role="status" class="text-sm text-muted-foreground">
+              正在读取配置…
+            </p>
+            <Button v-if="!status && !loading" variant="outline" @click="refresh">
+              重新读取
+            </Button>
+            <template v-if="status">
+              <fieldset :disabled="busy" class="min-w-0 overflow-hidden rounded-xl border bg-card">
+                <div class="flex items-center justify-between gap-4 border-b px-5 py-4">
+                  <div>
+                    <h2 class="text-sm font-medium">
+                      模型服务 <span v-if="draft.providers.length" class="ml-1 text-muted-foreground">{{ draft.providers.length }}</span>
+                    </h2><p class="mt-1 text-xs text-muted-foreground">
+                      连接配置和模型统一在这里管理。
+                    </p>
+                  </div><Button size="sm" :disabled="editing !== null" @click="editing = ''">
+                    添加模型服务
                   </Button>
                 </div>
-              </div>
-            </fieldset>
-            <Card>
-              <CardHeader>
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <CardTitle>内置运行时</CardTitle><span class="text-xs text-muted-foreground">{{ status.runtimePrepared ? '资源已准备' : '资源尚未准备' }}</span>
-                </div>
-                <CardDescription>pi {{ status.runtimeVersion }} · Node {{ status.nodeVersion }}</CardDescription>
-              </CardHeader><CardContent>
-                <Collapsible>
-                  <CollapsibleTrigger as-child>
-                    <Button type="button" variant="ghost" size="sm">
-                      本地配置文件
-                    </Button>
-                  </CollapsibleTrigger><CollapsibleContent>
-                    <div class="flex flex-col gap-3 pt-3">
-                      <p class="text-xs leading-6 text-muted-foreground">
-                        API Key 以明文保存在本机，界面不会回显已保存的 Key。
-                      </p><p class="break-all font-mono text-[11px] text-muted-foreground">
-                        {{ status.configurationDirectory }}
-                      </p><div class="flex justify-end">
-                        <Button variant="outline" size="sm" @click="openDirectory">
-                          打开配置目录
+                <Dialog :open="editing !== null" @update:open="!$event && (editing = null)">
+                  <DialogContent class="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl" @pointer-down-outside.prevent @interact-outside.prevent>
+                    <DialogHeader class="shrink-0 border-b px-6 py-5 pr-12 text-left">
+                      <DialogTitle>{{ currentProvider ? '编辑模型服务' : '添加模型服务' }}</DialogTitle><DialogDescription>填写连接信息和模型。添加或更新到列表后，仍需点击“保存配置”才能生效。</DialogDescription>
+                    </DialogHeader>
+                    <ProviderEditor v-if="editing !== null" :key="editing" :provider="currentProvider" :existing-ids="existingIds" @apply="apply" @cancel="editing = null" />
+                  </DialogContent>
+                </Dialog>
+                <div class="divide-y">
+                  <Empty v-if="!draft.providers.length">
+                    <EmptyHeader>
+                      <EmptyTitle>
+                        尚未添加模型服务
+                      </EmptyTitle><EmptyDescription>
+                        点击右上方“添加模型服务”，填写服务地址、API Key 和模型信息。
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                  <article v-for="provider in draft.providers" :key="provider.id" class="p-5">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <h3 class="font-medium">
+                          {{ provider.name }}
+                        </h3><p class="mt-1 break-all font-mono text-xs text-muted-foreground">
+                          {{ provider.id }}
+                        </p>
+                      </div><div class="flex gap-1">
+                        <Button variant="ghost" size="sm" @click="editing = provider.id">
+                          编辑
+                        </Button><Button variant="ghost" size="sm" class="text-destructive" @click="remove(provider.id)">
+                          移除
                         </Button>
                       </div>
                     </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              </CardContent>
-            </Card>
-          </template>
+                    <div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <span>{{ apiLabel(provider.api) }}</span><span>{{ provider.apiKey || provider.keyConfigured ? 'Key 已填写' : 'Key 未填写' }}</span><span class="break-all">{{ provider.baseUrl }}</span>
+                    </div>
+                    <ul class="mt-4 divide-y rounded-lg bg-muted/30 px-3 text-sm">
+                      <li v-for="model in provider.models" :key="model.id" class="flex flex-wrap items-center justify-between gap-2 py-3">
+                        <span>{{ model.name }} <span class="ml-2 font-mono text-xs text-muted-foreground">{{ model.id }}</span></span><span class="text-xs text-muted-foreground">{{ model.contextWindow.toLocaleString() }} 上下文 · {{ model.maxTokens.toLocaleString() }} 输出{{ model.input.includes('image') ? ' · 图片' : '' }}{{ model.reasoning ? ' · 推理' : '' }}</span>
+                      </li>
+                    </ul>
+                  </article>
+                </div>
+                <FieldGroup class="border-t p-5">
+                  <Field orientation="responsive" :data-disabled="busy || editing !== null">
+                    <FieldContent>
+                      <FieldLabel for="default-model">
+                        默认模型
+                      </FieldLabel><FieldDescription>
+                        用于后续新任务
+                      </FieldDescription>
+                    </FieldContent><FieldContent class="min-w-0 sm:flex-3">
+                      <Select v-if="modelOptions.length" v-model="defaultValue" :disabled="busy || editing !== null">
+                        <SelectTrigger id="default-model" class="w-full">
+                          <SelectValue placeholder="请选择默认模型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem :value="JSON.stringify(['', ''])">
+                              请选择默认模型
+                            </SelectItem>
+                            <SelectItem v-for="option in modelOptions" :key="option.value" :value="option.value">
+                              {{ option.label }}
+                            </SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select><FieldDescription v-else>
+                        添加模型后可选择
+                      </FieldDescription><FieldDescription v-if="modelOptions.length">
+                        保存后下次任务生效，正在执行的任务不受影响。
+                      </FieldDescription>
+                    </FieldContent>
+                  </Field>
+                </FieldGroup>
+              </fieldset>
+              <Card>
+                <CardHeader>
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <CardTitle>内置运行时</CardTitle><span class="text-xs text-muted-foreground">{{ status.runtimePrepared ? '资源已准备' : '资源尚未准备' }}</span>
+                  </div>
+                  <CardDescription>pi {{ status.runtimeVersion }} · Node {{ status.nodeVersion }}</CardDescription>
+                </CardHeader><CardContent>
+                  <Collapsible>
+                    <CollapsibleTrigger as-child>
+                      <Button type="button" variant="ghost" size="sm">
+                        本地配置文件
+                      </Button>
+                    </CollapsibleTrigger><CollapsibleContent>
+                      <div class="flex flex-col gap-3 pt-3">
+                        <p class="text-xs leading-6 text-muted-foreground">
+                          API Key 以明文保存在本机，界面不会回显已保存的 Key。
+                        </p><p class="break-all font-mono text-[11px] text-muted-foreground">
+                          {{ status.configurationDirectory }}
+                        </p><div class="flex justify-end">
+                          <Button variant="outline" size="sm" @click="openDirectory">
+                            打开配置目录
+                          </Button>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </CardContent>
+              </Card>
+            </template>
+          </div>
+          <div v-if="status" class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t bg-background py-4">
+            <p v-if="error" role="alert" class="w-full break-words text-sm text-destructive">
+              {{ error }}
+            </p>
+            <div class="text-xs">
+              <span v-if="saved" role="status" class="text-green-700 dark:text-green-400">配置已保存</span><span v-else-if="dirty" role="status" class="text-muted-foreground">修改尚未保存，离开设置页将丢弃修改。</span><span v-else class="text-muted-foreground">{{ draft.providers.length ? '配置保存在本机' : '未配置时仍可保存需求和管理项目' }}</span>
+            </div><div class="ml-auto flex gap-2">
+              <Button variant="outline" :disabled="busy || (!dirty && editing === null)" @click="reset">
+                放弃修改
+              </Button><Button :disabled="!dirty || editing !== null || busy" @click="persist">
+                {{ saving ? '保存中…' : '保存配置' }}
+              </Button>
+            </div>
+          </div>
         </TabsContent>
-        <TabsContent v-show="tab === 'memory'" value="memory" force-mount>
+        <TabsContent v-show="tab === 'memory'" value="memory" force-mount class="min-h-0 flex-1 overflow-y-auto pb-6">
           <LongTermMemorySettings :memory-id="memoryId" />
         </TabsContent>
       </Tabs>

@@ -25,11 +25,11 @@ function apply(): void {
   error.value = ''
   const id = form.id.trim()
   if (!/^[\w.-]+$/.test(id)) {
-    error.value = 'Provider ID 只能包含字母、数字、点、横线和下划线。'
+    error.value = '服务商 ID 只能包含字母、数字、点、横线和下划线。'
     return
   }
   if (props.existingIds.includes(id) && id !== props.provider?.id) {
-    error.value = 'Provider ID 已存在。'
+    error.value = '服务商 ID 已存在。'
     return
   }
   if (!form.models.length) {
@@ -38,7 +38,7 @@ function apply(): void {
   }
   const models = form.models.map(model => ({ ...model, id: model.id.trim(), name: model.name.trim(), contextWindow: Number(model.contextWindow), maxTokens: Number(model.maxTokens) }))
   if (new Set(models.map(model => model.id)).size !== models.length) {
-    error.value = '同一 provider 下的模型 ID 不能重复。'
+    error.value = '同一模型服务下的模型 ID 不能重复。'
     return
   }
   emit('apply', {
@@ -66,7 +66,7 @@ function apply(): void {
         </Field>
         <Field :data-disabled="!!provider">
           <FieldLabel :for="`${fieldId}-id`">
-            Provider ID
+            服务商 ID
           </FieldLabel>
           <Input :id="`${fieldId}-id`" v-model="form.id" required :disabled="!!provider" :aria-describedby="`${fieldId}-id-help`" placeholder="例如：my-provider" />
           <FieldDescription :id="`${fieldId}-id-help`">
@@ -75,7 +75,7 @@ function apply(): void {
         </Field>
         <Field>
           <FieldLabel :for="`${fieldId}-url`">
-            Base URL
+            服务地址（Base URL）
           </FieldLabel>
           <Input :id="`${fieldId}-url`" v-model="form.baseUrl" type="url" required placeholder="https://api.example.com/v1" />
         </Field>
@@ -116,7 +116,7 @@ function apply(): void {
       <Button type="button" variant="outline" @click="emit('cancel')">
         取消
       </Button><Button type="submit">
-        {{ provider ? '应用修改' : '添加到列表' }}
+        {{ provider ? '更新到列表' : '添加到列表' }}
       </Button>
     </div>
   </form>

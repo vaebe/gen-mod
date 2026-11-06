@@ -6,7 +6,7 @@ import { useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import ExtensionDialog from '@/features/chat/ExtensionDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
@@ -42,10 +42,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <SidebarProvider class="h-full min-h-0" :style="{ '--sidebar-width': '16rem' }">
+  <SidebarProvider :open="true" class="h-full min-h-0" :style="{ '--sidebar-width': '14rem' }">
     <ProjectSidebar />
-    <SidebarInset class="min-h-0 overflow-hidden [@media(max-width:768px)]:pl-12 md:peer-data-[state=collapsed]:pl-12">
-      <SidebarTrigger class="absolute left-3 top-3 z-10 hidden [@media(max-width:768px)]:flex group-has-[[data-slot=sidebar][data-state=collapsed]]/sidebar-wrapper:flex" aria-label="展开项目导航" title="展开项目导航" />
+    <SidebarInset class="min-h-0 overflow-hidden">
       <div ref="contextContainer" class="flex min-h-0 flex-1">
         <ResizablePanelGroup direction="horizontal" class="min-h-0 flex-1">
           <ResizablePanel :order="0" :default-size="75" :min-size="20">

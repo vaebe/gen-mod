@@ -328,11 +328,11 @@ onBeforeRouteUpdate(leave)
     <div v-else-if="loadingProject || opening" role="status" class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
       正在加载会话…
     </div>
-    <Empty v-else class="studio-empty min-h-0 overflow-auto rounded-none">
+    <Empty v-else class="min-h-0 overflow-auto rounded-none">
       <EmptyHeader>
-        <EmptyDescription class="font-mono text-xs text-primary">
+        <EmptyDescription>
           {{ project?.gameSkillName }}
-        </EmptyDescription><EmptyTitle class="font-[family-name:var(--font-display)] text-2xl tracking-tight sm:text-3xl">
+        </EmptyDescription><EmptyTitle>
           你的 MOD，想从哪里开始？
         </EmptyTitle><EmptyDescription>
           描述希望实现的行为。源码会保存在项目中，每次成功交付形成独立版本。

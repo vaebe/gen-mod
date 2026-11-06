@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 128 128">
+  <title>Gen MOD</title>
+  <rect width="128" height="128" rx="27" fill="#181615"/>
+  <g fill="#F2CA8F" transform="translate(12 9) scale(.8)">
+    <path d="M15 49 44 19Q46 17 49 17H97Q100 17 102 20L113 34Q116 38 111 38H63L20 81Q15 86 15 79Z"/>
+    <path d="M70 60H112Q116 60 116 64V97Q116 100 114 102L101 115Q99 117 96 117H48Q45 117 43 115L23 95Q20 92 23 89L37 75Q40 72 43 75L65 98H93V83H61Q56 83 59 79L67 63Q68 60 70 60Z"/>
+  </g>
+</svg>

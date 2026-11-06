@@ -122,7 +122,7 @@ onMounted(async () => {
     </Empty>
     <ul v-else class="flex flex-col gap-2">
       <li v-for="note in notes" :key="note.noteId">
-        <Button variant="outline" class="h-auto w-full justify-start whitespace-normal py-3 text-left" :disabled="saving" @click="select(note.noteId)">
+        <Button variant="outline" class="h-auto w-full justify-start whitespace-normal py-3 text-left text-sm" :disabled="saving" @click="select(note.noteId)">
           <span class="flex min-w-0 flex-col gap-1">
             <span>
               {{ note.title }}
