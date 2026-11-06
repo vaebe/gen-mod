@@ -70,6 +70,10 @@ jobs:
       - name: Prepare bundled Node and pi runtime
         run: pnpm prepare:runtime
 
+      # legacy deploy 会改写源工作区依赖状态，构建前恢复开发依赖，避免脚本检查按生产模式裁剪工具链。
+      - name: Restore build dependencies after runtime deployment
+        run: pnpm install --frozen-lockfile --ignore-scripts --prod=false
+
       - name: Build NSIS installer
         run: pnpm build:app
 
