@@ -1,6 +1,15 @@
 import { expect, it } from 'vitest'
 import { emptyChat, reduceRecord, restoreChat } from './reducer'
 
+it('恢复累计消息后到达的结束事件更新原消息，不追加重复正文', () => {
+  const message = { role: 'assistant', timestamp: 100, content: [{ type: 'text', text: '执行中' }] }
+  const restored = restoreChat([message])
+  const next = reduceRecord(restored, { type: 'message_end', message: { ...message, content: [{ type: 'text', text: '执行完成' }] } })
+  expect(next.messages).toHaveLength(1)
+  expect(next.messages[0]?.parts).toEqual([{ type: 'text', text: '执行完成' }])
+  expect(next.messages[0]?.final).toBe(true)
+})
+
 const memorySave = { outcome: 'saved', noteId: 'memory-1', revision: 2, title: '版本适配' }
 const content = [{ type: 'text', text: '原生已提交' }]
 

@@ -64,16 +64,16 @@ function changeThinking(level?: ThinkingLevel): void {
       <DropdownMenuContent side="top" align="end" :side-offset="8" class="max-h-80 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto">
         <DropdownMenuGroup><DropdownMenuLabel>选择模型</DropdownMenuLabel></DropdownMenuGroup>
         <DropdownMenuGroup v-for="provider in providers" :key="provider.id">
-          <DropdownMenuLabel v-if="provider.models.length">
+          <DropdownMenuLabel v-if="provider.models.length" class="truncate" :title="provider.name">
             {{ provider.name }}
           </DropdownMenuLabel>
-          <DropdownMenuItem v-for="model in provider.models" :key="model.id" :disabled="disabled || !provider.keyConfigured" :title="provider.keyConfigured ? `${provider.name} · ${model.id}` : '请先在设置页填写此服务商的 API Key'" class="justify-between gap-4" @select="choose(provider.id, model.id)">
+          <DropdownMenuItem v-for="model in provider.models" :key="model.id" :disabled="disabled || !provider.keyConfigured" :title="provider.keyConfigured ? `${model.name} · ${provider.name} · ${model.id}` : '请先在设置页填写此服务商的 API Key'" class="justify-between gap-4" @select="choose(provider.id, model.id)">
             <span class="min-w-0 truncate">{{ model.name }}</span><Check v-if="modelState?.selection.providerId === provider.id && modelState.selection.modelId === model.id" class="size-4 shrink-0 text-muted-foreground" />
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-    <span v-else class="max-w-44 truncate px-3 py-1.5 text-xs" :title="name">{{ name }}</span>
+    <span v-else class="max-w-44 truncate px-3 py-1.5 text-[13px]" :title="name">{{ name }}</span>
     <Popover v-if="modelState?.definition?.reasoning && thinkingLevels.length" v-model:open="thinkingOpen">
       <PopoverTrigger as-child>
         <Button variant="ghost" size="sm" class="h-8 gap-1 rounded-full pr-3 pl-2 text-muted-foreground" :disabled="thinkingDisabled" aria-label="选择思考强度">

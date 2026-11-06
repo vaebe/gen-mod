@@ -246,9 +246,9 @@ onMounted(() => {
             <p v-if="error" role="alert" class="w-full break-words text-sm text-destructive">
               {{ error }}
             </p>
-            <div class="text-xs">
+            <div class="min-w-0 flex-1 text-xs leading-5">
               <span v-if="saved" role="status" class="text-green-700 dark:text-green-400">配置已保存</span><span v-else-if="dirty" role="status" class="text-muted-foreground">修改尚未保存，离开设置页将丢弃修改。</span><span v-else class="text-muted-foreground">{{ draft.providers.length ? '配置保存在本机' : '未配置时仍可保存需求和管理项目' }}</span>
-            </div><div class="ml-auto flex gap-2">
+            </div><div class="ml-auto flex shrink-0 gap-2">
               <Button variant="outline" :disabled="busy || (!dirty && editing === null)" @click="reset">
                 放弃修改
               </Button><Button :disabled="!dirty || editing !== null || busy" @click="persist">

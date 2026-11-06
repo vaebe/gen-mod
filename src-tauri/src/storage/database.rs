@@ -41,7 +41,7 @@ pub fn initialize(app: &tauri::AppHandle) -> Result<(), String> {
         tx.execute("INSERT INTO schema_migrations VALUES(2,?1)", [super::mods::now()?]).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
     }
-    for (version,sql) in [(3, include_str!("migrations/003_project_context.sql")),(4,include_str!("migrations/004_delivery_metadata.sql")),(5,include_str!("migrations/005_verification.sql")),(6,include_str!("migrations/006_knowledge.sql")),(7,include_str!("migrations/007_inspection.sql")),(8,include_str!("migrations/008_assets.sql")),(9,include_str!("migrations/009_memory.sql")),(10,include_str!("migrations/010_project_lifecycle.sql"))] {
+    for (version,sql) in [(3, include_str!("migrations/003_project_context.sql")),(4,include_str!("migrations/004_delivery_metadata.sql")),(5,include_str!("migrations/005_verification.sql")),(6,include_str!("migrations/006_knowledge.sql")),(7,include_str!("migrations/007_inspection.sql")),(8,include_str!("migrations/008_assets.sql")),(9,include_str!("migrations/009_memory.sql")),(10,include_str!("migrations/010_project_lifecycle.sql")),(11,include_str!("migrations/011_submission_requests.sql")),(12,include_str!("migrations/012_submission_messages.sql"))] {
         let applied:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=?1)",[version],|r|r.get(0)).map_err(|e|e.to_string())?;
         if !applied {
             let tx=connection.transaction().map_err(|e|e.to_string())?;
@@ -57,6 +57,7 @@ pub fn initialize(app: &tauri::AppHandle) -> Result<(), String> {
     crate::project_context::repository::backfill(app)?;
     crate::artifacts::delivery_metadata::backfill(app)?;
     super::repository::interrupt_previous(app)?;
+    connect(app)?.execute("UPDATE submission_requests SET status='rejected',error='应用已重启，提交未启动' WHERE status='pending' AND task_id IS NULL",[]).map_err(|e|e.to_string())?;
     super::repository::reconcile_files(app)
 }
 

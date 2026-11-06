@@ -7,3 +7,6 @@ pub mod logs;
 mod job;
 mod manager;
 pub mod workspace;
+
+mod subscription;
+pub mod submissions;

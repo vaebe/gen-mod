@@ -4,17 +4,18 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::{fs, io::{BufRead, BufReader, Write}, process::{Child, ChildStdin}, sync::{Arc, Mutex}};
 use tauri::{ipc::Channel, Manager};
+use super::subscription::Subscription;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Envelope { mod_id: String, session_id: String, task_id: Option<String>, generation: u64, kind: String, record: Value }
+pub struct Envelope { pub(super) sequence: u64, pub(super) subscription: u64, pub(super) mod_id: String, pub(super) session_id: String, pub(super) task_id: Option<String>, pub(super) generation: u64, pub(super) kind: String, pub(super) record: Value }
 
 struct Process {
     child: Child,
     stdin: ChildStdin,
     _job: Option<ProcessJob>,
     _configuration: tempfile::TempDir,
-    channel: Channel<Envelope>,
+    channel: Subscription,
     mod_id: String,
     session_id: String,
     task: Option<TaskRecord>,
@@ -42,7 +43,7 @@ struct Process {
 #[derive(Default)]
 struct Inner { generation: u64, process: Option<Process> }
 type Preparations=Arc<Mutex<std::collections::BTreeMap<(String,String),Preparation>>>;
-struct Preparation {generation:u64,cancelled:Arc<std::sync::atomic::AtomicBool>,channel:Channel<Envelope>}
+struct Preparation {generation:u64,cancelled:Arc<std::sync::atomic::AtomicBool>,channel:Subscription}
 #[derive(Default, Clone)]
 pub struct PiState(Arc<super::manager::Registry<Inner>>,Preparations);
 struct PreparationGuard {registry:Preparations,key:(String,String)}
@@ -128,17 +129,17 @@ fn emit(process: &Process, generation: u64, kind: &str, record: Value) {
                     writeln!(file,"{}",json!({"timestamp":mods::now()?,"generation":generation,"taskId":task.context.task_id,"kind":kind,"record":record})).map_err(|e|e.to_string())
                 })();
                 if let Err(error) = saved {
-                    let _ = process.channel.send(Envelope {mod_id:process.mod_id.clone(),session_id:process.session_id.clone(),task_id:Some(task.context.task_id.clone()),generation,kind:"diagnostic".into(),record:json!({"type":"log_error","message":format!("任务事件日志保存失败：{error}")})});
+                    let _ = process.channel.send(Envelope {sequence:0,subscription:0,mod_id:process.mod_id.clone(),session_id:process.session_id.clone(),task_id:Some(task.context.task_id.clone()),generation,kind:"diagnostic".into(),record:json!({"type":"log_error","message":format!("任务事件日志保存失败：{error}")})});
                 }
             }
         }
         let entry = super::logs::RuntimeLogEntry { timestamp: mods::now().unwrap_or_default(), generation, task_id: process.task.as_ref().map(|t| t.context.task_id.clone()), message: message.chars().take(4000).collect() };
         let saved = crate::storage::repository::log(&process.app, &process.mod_id, &process.session_id, &entry);
         if let Err(error) = saved {
-            let _ = process.channel.send(Envelope { mod_id: process.mod_id.clone(), session_id: process.session_id.clone(), task_id: process.task.as_ref().map(|t| t.context.task_id.clone()), generation, kind: "diagnostic".into(), record: json!({"type": "log_error", "message": format!("运行日志保存失败：{error}")}) });
+            let _ = process.channel.send(Envelope { sequence: 0, subscription: 0, mod_id: process.mod_id.clone(), session_id: process.session_id.clone(), task_id: process.task.as_ref().map(|t| t.context.task_id.clone()), generation, kind: "diagnostic".into(), record: json!({"type": "log_error", "message": format!("运行日志保存失败：{error}")}) });
         }
     }
-    let _ = process.channel.send(Envelope { mod_id: process.mod_id.clone(), session_id: process.session_id.clone(), task_id: process.task.as_ref().map(|t| t.context.task_id.clone()), generation, kind: kind.into(), record });
+    let _ = process.channel.send(Envelope { sequence: 0, subscription: 0, mod_id: process.mod_id.clone(), session_id: process.session_id.clone(), task_id: process.task.as_ref().map(|t| t.context.task_id.clone()), generation, kind: kind.into(), record });
 }
 
 /// 命令 leader 退出不代表后代已结束；等待时释放槽锁，停止仍可进入。
@@ -191,8 +192,8 @@ fn notify_source_changed(app: &tauri::AppHandle, mod_id: &str, task_id: &str) {
     }
 }
 
-fn emit_entry_confirmation(channel: &Channel<Envelope>, mod_id: String, session_id: String, task_id: Option<String>, generation: u64, input: Value) {
-    let _ = channel.send(Envelope { mod_id,session_id,task_id,generation,kind:"task".into(),record:json!({"type":"steering_confirmed","input":input}) });
+fn emit_entry_confirmation(channel: &Subscription, mod_id: String, session_id: String, task_id: Option<String>, generation: u64, input: Value) {
+    let _ = channel.send(Envelope { sequence:0,subscription:0,mod_id,session_id,task_id,generation,kind:"task".into(),record:json!({"type":"steering_confirmed","input":input}) });
 }
 
 fn continue_worker_cleanup(process: &mut Process, request: &Value) {
@@ -267,7 +268,7 @@ fn refresh_changes(app: &tauri::AppHandle, process: &Process, generation: u64, s
                         project.updated_at=mods::now()?; Ok(())
                     })?;
                 }
-                let _ = channel.send(Envelope {mod_id:context.mod_id.clone(),session_id:context.session_id.clone(),task_id:Some(context.task_id.clone()),generation,kind:"task".into(),record:json!({"type":"changes_updated","taskId":context.task_id})});
+                let _ = channel.send(Envelope {sequence:0,subscription:0,mod_id:context.mod_id.clone(),session_id:context.session_id.clone(),task_id:Some(context.task_id.clone()),generation,kind:"task".into(),record:json!({"type":"changes_updated","taskId":context.task_id})});
                 Ok(())
             })();
             drop(inner);
@@ -275,7 +276,7 @@ fn refresh_changes(app: &tauri::AppHandle, process: &Process, generation: u64, s
             return refreshed.and(released.map(|_|()));
         } })();
         if let Err(error) = result {
-            let _ = channel.send(Envelope {mod_id:context.mod_id.clone(),session_id:context.session_id.clone(),task_id:Some(context.task_id.clone()),generation,kind:"diagnostic".into(),record:json!({"type":"bridge_error","message":error})});
+            let _ = channel.send(Envelope {sequence:0,subscription:0,mod_id:context.mod_id.clone(),session_id:context.session_id.clone(),task_id:Some(context.task_id.clone()),generation,kind:"diagnostic".into(),record:json!({"type":"bridge_error","message":error})});
         }
     });
     Ok(())
@@ -350,7 +351,7 @@ fn register_prepared_delivery(app: &tauri::AppHandle, process: &mut Process, gen
     Ok(version.version_id)
 }
 
-fn handle_record(app: &tauri::AppHandle, process: &mut Process, generation: u64, record: &Value) -> Result<(), String> {
+fn handle_record(app: &tauri::AppHandle, process: &mut Process, generation: u64, record: &Value, original_user_message: Option<&Value>) -> Result<(), String> {
     // 复用 RPC 扩展请求通道完成应用内部登记，不弹出用户输入框。
     if record["type"] == "extension_ui_request" && record["method"] == "input" && record["title"] == "gen-mod:register-delivery" {
         let request_id = record["id"].as_str().ok_or("交付登记请求缺少 ID")?;
@@ -372,6 +373,14 @@ fn handle_record(app: &tauri::AppHandle, process: &mut Process, generation: u64,
     // 先交付协议记录，派生文件检查失败也不丢失工具/消息终态。
     let mut annotated = record.clone();
     update_steering(app,process,&mut annotated)?;
+    if annotated["message"]["role"] == "user" && annotated["inputId"].is_null() {
+        if let Some(id) = &process.prompt_id { annotated["inputId"] = id.clone().into(); }
+    }
+    if let Some(message) = original_user_message {
+        if let Some(id) = &process.prompt_id {
+            if annotated["inputId"] == *id { super::submissions::confirm_message(app, id, message)?; }
+        }
+    }
     emit(process, generation, "record", annotated);
     let record_type = record["type"].as_str().unwrap_or("");
     if record_type == "response" && record["command"] == "get_session_stats" && record["success"] == true {
@@ -450,6 +459,7 @@ fn handle_record(app: &tauri::AppHandle, process: &mut Process, generation: u64,
     }
     if record_type == "response" && process.prompt_id.as_deref() == record["id"].as_str() {
         if record["success"].as_bool() != Some(true) {
+            if let Some(id) = &process.prompt_id { super::submissions::reject(app,id,record["error"].as_str().unwrap_or("需求提交失败"))?; }
             process.active = false;
             if let Some(task) = process.task.as_mut() { task.status = "failed".into(); persist_task(app, task)?; }
         } else if record["data"]["disposition"] == "handled" {
@@ -464,6 +474,7 @@ fn handle_record(app: &tauri::AppHandle, process: &mut Process, generation: u64,
 
 fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &str, session_id: &str, channel: Channel<Envelope>, mut task: Option<TaskRecord>) -> Result<u64, String> {
     stop(app, inner)?;
+    let channel = Subscription::new(channel);
     let connection = crate::storage::database::connect(app)?;
     let saved_generation: i64 = connection.query_row("SELECT generation FROM sessions WHERE mod_id=?1 AND session_id=?2",rusqlite::params![mod_id,session_id],|r|r.get(0)).map_err(|e|e.to_string())?;
     inner.generation = inner.generation.max(saved_generation as u64);
@@ -555,6 +566,8 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
             }
             match serde_json::from_slice::<Value>(&bytes) {
                 Ok(mut record) if record.get("type").and_then(Value::as_str).is_some() => {
+                    // 指纹对应磁盘原始消息；只持久化摘要，展示与日志仍使用脱敏记录。
+                    let original_user_message = (record["type"] == "message_end" && record["message"]["role"] == "user").then(|| record["message"].clone());
                     redact(&mut record, &stdout_secrets);
                     if record["type"]=="extension_ui_request" && record["method"]=="input" && (super::task_tools::expected_tool(record["title"].as_str().unwrap_or("")).is_some() || record["title"]=="gen-mod:register-delivery") {
                         let title=record["title"].as_str().unwrap_or("").to_string();
@@ -700,7 +713,7 @@ fn spawn(app: &tauri::AppHandle, state: &SlotState, inner: &mut Inner, mod_id: &
                             }
                         }
                     }
-                    if let Err(error) = handle_record(&app_stdout, process, generation, &record) {
+                    if let Err(error) = handle_record(&app_stdout, process, generation, &record, original_user_message.as_ref()) {
                         emit(process, generation, "diagnostic", json!({ "type": "bridge_error", "message": error }));
                     }
                 }
@@ -877,7 +890,7 @@ pub fn send_pi_command(app: tauri::AppHandle, state: tauri::State<PiState>, mod_
             if value.generation!=generation{return Err("连接已被替换".into());}
             if command["id"].as_str().is_none(){return Err("RPC 缺少请求 ID".into());}
             value.cancelled.store(true,std::sync::atomic::Ordering::SeqCst);
-            let _=value.channel.send(Envelope{mod_id,session_id,task_id:None,generation,kind:"record".into(),record:json!({"type":"response","command":"abort","id":command["id"],"success":true})});
+            let _=value.channel.send(Envelope{sequence:0,subscription:0,mod_id,session_id,task_id:None,generation,kind:"record".into(),record:json!({"type":"response","command":"abort","id":command["id"],"success":true})});
             return Ok(());
         }
     }
@@ -918,11 +931,14 @@ pub fn disconnect_pi(app: tauri::AppHandle, state: tauri::State<PiState>, mod_id
 
 #[tauri::command]
 pub async fn start_mod_task(app: tauri::AppHandle, mod_id: String, session_id: String, requirement: String, thinking_level: String, images: Option<Vec<Value>>, request_id: String, on_event: Channel<Envelope>) -> Result<TaskContext, String> {
+    super::submissions::register(&app,&mod_id,&session_id,&request_id)?;
     // 文件快照与进程回收可能耗时，保持原有锁和校验顺序，在阻塞线程执行。
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<PiState>();
         let storage = app.state::<StorageState>();
-        start_mod_task_blocking(app.clone(), state, storage, mod_id, session_id, requirement, thinking_level, images, request_id, on_event)
+        let result = start_mod_task_blocking(app.clone(), state, storage, mod_id, session_id, requirement, thinking_level, images, request_id.clone(), on_event);
+        if let Err(error) = &result { super::submissions::reject(&app,&request_id,error)?; }
+        result
     }).await.map_err(|error| format!("任务准备线程异常：{error}"))?
 }
 
@@ -1020,6 +1036,49 @@ fn update_steering(app: &tauri::AppHandle, process: &mut Process, record: &mut V
 }
 
 /// 执行任务准备；仅由后台提交入口调用，不直接注册为 IPC 命令。
+#[tauri::command]
+pub async fn reserve_pi_subscription(app: tauri::AppHandle, mod_id: String, session_id: String) -> Result<Value,String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let slot=app.state::<PiState>().0.slot(&mod_id,&session_id)?;
+        let inner=slot.lock().map_err(|_|"运行时锁异常")?;
+        Ok(json!({"generation":inner.generation,"ticket":inner.process.as_ref().map(|p|p.channel.reserve()).transpose()?.unwrap_or(0)}))
+    }).await.map_err(|e|e.to_string())?
+}
+
+/// 只读取或附着已有进程；快照和订阅切换共享槽锁，不创建或替换执行链。
+#[tauri::command]
+pub async fn read_pi_runtime(app: tauri::AppHandle, mod_id: String, session_id: String, attach_generation: Option<u64>, ticket: Option<u64>, on_event: Channel<Envelope>) -> Result<Value,String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let slot=app.state::<PiState>().0.slot(&mod_id,&session_id)?;
+        let inner=slot.lock().map_err(|_|"运行时锁异常")?;
+        if attach_generation.is_some_and(|v|v!=inner.generation) {return Err("恢复期间任务已切换，请重新连接".into());}
+        let project=mods::read_project(&app,&mod_id)?;
+        if !project.sessions.iter().any(|v|v.session_id==session_id) {return Err("会话不属于项目".into());}
+        let full=attach_generation.is_some();
+        // 持槽锁读取历史，随后捕获内存中的累计消息；期间的后续输出在快照后投递。
+        let history=if full {super::sessions::read_session_history(app.clone(),mod_id.clone(),session_id.clone())?} else {json!({"messages":[]})};
+        let Some(process)=inner.process.as_ref() else {
+            let task=crate::storage::repository::tasks(&app,&mod_id)?.into_iter().find(|task|task.context.session_id==session_id);
+            return Ok(json!({"modId":mod_id,"sessionId":session_id,"generation":inner.generation,"connected":false,"active":false,"compacting":false,"stopping":false,"running":false,"sequence":0,"subscription":0,"task":task,"messages":history["messages"],"tools":[]}));
+        };
+        let attach=if full {Some((ticket.ok_or("缺少订阅票据")?,on_event))} else {None};
+        let mut result=process.channel.snapshot(attach)?;
+        if full {
+            let mut messages=std::collections::BTreeMap::new();
+            for message in history["messages"].as_array().into_iter().flatten().chain(result["messages"].as_array().into_iter().flatten()) {
+                if let (Some(timestamp),Some(role))=(message["timestamp"].as_i64(),message["role"].as_str()) {messages.insert((timestamp,role.to_string(),message["toolCallId"].as_str().unwrap_or("").to_string()),message.clone());}
+            }
+            result["messages"]=json!(messages.into_values().collect::<Vec<_>>());
+        }
+        result["modId"]=mod_id.into(); result["sessionId"]=session_id.into(); result["generation"]=inner.generation.into();
+        result["connected"]=true.into(); result["active"]=process.active.into(); result["compacting"]=process.compacting.into(); result["stopping"]=process.stopping.into();
+        result["running"]=(process.active||process.task.as_ref().is_some_and(|t|matches!(t.status.as_str(),"preparing"|"running"|"stopping"))).into();
+        result["task"]=serde_json::to_value(&process.task).map_err(|e|e.to_string())?;
+        Ok(result)
+    }).await.map_err(|e|e.to_string())?
+}
+
+/// 执行任务准备；仅由后台提交入口调用，不直接注册为 IPC 命令。
 fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, storage: tauri::State<StorageState>, mod_id: String, session_id: String, requirement: String, thinking_level: String, images: Option<Vec<Value>>, request_id: String, on_event: Channel<Envelope>) -> Result<TaskContext, String> {
     let images = images.unwrap_or_default();
     validate_images(&images)?;
@@ -1055,6 +1114,7 @@ fn start_mod_task_blocking(app: tauri::AppHandle, state: tauri::State<PiState>, 
         context.context_snapshot_id=Some(snapshot.snapshot_id.clone());
         let task=TaskRecord{context:context.clone(),status:"preparing".into(),finished_at:None,commands:vec![],registered_version_id:None};
         crate::storage::repository::task_on(&tx,&task)?;
+        super::submissions::bind_on(&tx,&request_id,&task.context.task_id)?;
         tx.commit().map_err(|e|e.to_string())?;
         (snapshot,task)
     };

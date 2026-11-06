@@ -67,7 +67,7 @@ function normalize(state: ChatState, raw: unknown, id: string, final: boolean): 
       state.tools[part.id] = previous ?? { toolCallId: part.id, name: String(part.name ?? '工具'), args: part.arguments, status: 'waiting' }
     }
   }
-  return { id, entryId: typeof message.appEntryId === 'string' ? message.appEntryId : undefined, role: message.role, parts, final, error: typeof message.errorMessage === 'string' ? message.errorMessage : undefined, timestamp: typeof message.timestamp === 'number' ? message.timestamp : undefined, stopReason: typeof message.stopReason === 'string' ? message.stopReason : undefined }
+  return { id, inputId: typeof message.appInputId === 'string' ? message.appInputId : undefined, taskId: typeof message.appTaskId === 'string' ? message.appTaskId : undefined, entryId: typeof message.appEntryId === 'string' ? message.appEntryId : undefined, role: message.role, parts, final, error: typeof message.errorMessage === 'string' ? message.errorMessage : undefined, timestamp: typeof message.timestamp === 'number' ? message.timestamp : undefined, stopReason: typeof message.stopReason === 'string' ? message.stopReason : undefined }
 }
 
 export function reduceRecord(state: ChatState, record: PiRecord): ChatState {
@@ -86,7 +86,9 @@ export function reduceRecord(state: ChatState, record: PiRecord): ChatState {
       return next
     }
     const confirmedId = typeof record.inputId === 'string' ? record.inputId : undefined
-    const id = message.role === 'user' && confirmedId ? confirmedId : message.role === 'user' && next.pendingUserId ? next.pendingUserId : record.type === 'message_start' || !next.liveMessageId ? crypto.randomUUID() : next.liveMessageId
+    const stableId = typeof message.timestamp === 'number' ? `${message.role}-${message.timestamp}` : undefined
+    const restored = stableId ? next.messages.find(item => item.role === message.role && item.timestamp === message.timestamp) : undefined
+    const id = restored?.id ?? (message.role === 'user' && confirmedId ? confirmedId : message.role === 'user' && next.pendingUserId ? next.pendingUserId : stableId ?? (record.type === 'message_start' || !next.liveMessageId ? crypto.randomUUID() : next.liveMessageId))
     const normalized = normalize(next, message, id, record.type === 'message_end')
     if (normalized) {
       normalized.inputId = confirmedId
@@ -150,7 +152,8 @@ export function restoreChat(messages: unknown[]): ChatState {
       state.tools[id] = { toolCallId: id, name: String(message.toolName ?? '工具'), args: state.tools[id]?.args, ...toolResult(historyOutput(message), message.isError) }
     }
     else {
-      const item = normalize(state, raw, `history-${index}-${String(message.timestamp ?? 0)}`, true)
+      const id = typeof message.appInputId === 'string' ? message.appInputId : typeof message.timestamp === 'number' ? `${message.role}-${message.timestamp}` : `history-${index}`
+      const item = normalize(state, raw, id, true)
       if (item) {
         state.messages.push(item)
       }

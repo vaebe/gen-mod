@@ -23,6 +23,7 @@ export const useSessionStore = defineStore('session', () => {
     if (existing && (existing.initialized)) {
       existing.readOnly = readOnly
       selectedKey.value = key(modId, sessionId!)
+      await existing.recover()
       return
     }
     const value = existing ?? runtime()
@@ -170,5 +171,12 @@ export const useSessionStore = defineStore('session', () => {
   const stopping = computed(() => selected.value.stopping)
   const steeringInputs = computed(() => selected.value.steeringInputs)
   const anyBusy = computed(() => [...runtimes.values()].some(value => value.busy))
-  return { forgetProject, attachments, canSteer, stopping, steeringInputs, runtimes, selectedKey, stateFor, isBusy, isRunning, anyBusy, open, close, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, modelState, modelChangeError, selectModel, refreshModel, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, send, abort, restart, flush, refreshStats, setThinking, compact }
+  const connectionError = computed(() => selected.value.connectionError)
+  const pendingInput = computed(() => selected.value.pendingInput)
+  const pendingStatus = computed(() => selected.value.pendingStatus)
+  const synchronizing = computed(() => selected.value.client.synchronizing)
+  const uncertain = computed(() => selected.value.uncertain)
+  const recover = (force = false) => selected.value.recover(force)
+  const clearPending = () => selected.value.clearPending()
+  return { connectionError, pendingInput, pendingStatus, synchronizing, uncertain, recover, clearPending, forgetProject, attachments, canSteer, stopping, steeringInputs, runtimes, selectedKey, stateFor, isBusy, isRunning, anyBusy, open, close, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, modelState, modelChangeError, selectModel, refreshModel, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, send, abort, restart, flush, refreshStats, setThinking, compact }
 })

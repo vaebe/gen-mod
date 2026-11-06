@@ -50,18 +50,18 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
           </Button>
         </div>
       </header>
-      <p v-if="projects.notice" role="status" class="mt-4 text-sm text-muted-foreground">
+      <p v-if="projects.notice" role="status" class="mt-4 break-words text-sm text-muted-foreground">
         {{ projects.notice }}
       </p>
-      <p v-if="gameError" role="alert" class="mt-4 text-sm text-destructive">
+      <p v-if="gameError" role="alert" class="mt-4 break-words text-sm text-destructive">
         游戏名称读取失败：{{ gameError }}
       </p>
-      <p v-if="projects.error" role="alert" class="mt-8 text-sm text-destructive">
-        {{ projects.error }}<Button variant="outline" size="sm" @click="projects.refresh">
+      <div v-if="projects.error" role="alert" class="mt-8 flex flex-wrap items-center gap-3 text-sm text-destructive">
+        <span class="min-w-0 break-words">{{ projects.error }}</span><Button variant="outline" size="sm" @click="projects.refresh">
           重试
         </Button>
-      </p>
-      <p v-else-if="projects.loading" class="mt-8 text-sm text-muted-foreground">
+      </div>
+      <p v-else-if="projects.loading" role="status" class="mt-8 text-sm text-muted-foreground">
         正在读取本地项目…
       </p>
       <Empty v-else-if="!projects.projects.length" class="mt-8 min-h-80 rounded-lg border border-dashed">
@@ -81,15 +81,15 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
       </Empty>
       <div v-else class="grid gap-4 lg:grid-cols-2">
         <Card v-for="project in projects.projects" :key="project.modId" class="studio-project-card flex h-full flex-col rounded-lg">
-          <RouterLink :to="`/mods/${project.modId}/chat`" class="group flex flex-1 flex-col gap-4 rounded-lg pt-5 focus-visible:outline focus-visible:outline-ring">
+          <RouterLink :to="`/mods/${project.modId}/chat`" class="group flex flex-1 flex-col gap-4 rounded-lg pt-5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
             <CardHeader class="px-5 pt-0 pb-0">
               <div class="flex items-center gap-3">
-                <GameIcon :game-id="project.gameId" /><CardTitle class="min-w-0 truncate text-base">
+                <GameIcon :game-id="project.gameId" /><CardTitle class="min-w-0 flex-1 truncate text-base leading-6" :title="project.name">
                   {{ project.name }}
                 </CardTitle><ArrowUpRight class="ml-auto size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
               </div>
             </CardHeader><CardContent class="flex-1 px-5 pb-5">
-              <CardDescription class="line-clamp-2 min-h-12 text-sm leading-6">
+              <CardDescription class="line-clamp-2 min-h-12 break-words text-sm leading-6">
                 {{ project.description || '暂无描述' }}
               </CardDescription>
             </CardContent>

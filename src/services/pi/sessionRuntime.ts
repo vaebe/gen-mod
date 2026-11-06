@@ -1,11 +1,13 @@
 import type { ModelSelection, SessionModelState } from '@/contracts/config'
 import type { ContextUsage, ImageInput, PromptAttachment, SteeringInput, ThinkingLevel } from '@/contracts/session'
 import type { TaskContext } from '@/contracts/task'
-import type { PiEnvelope, PiRecord } from '@/services/pi/types'
+import type { PendingSubmission } from '@/services/pi/pendingSubmission'
+import type { PiEnvelope, PiRecord, RuntimeSnapshot, SubmissionResult } from '@/services/pi/types'
 import { computed, shallowRef } from 'vue'
-import { modService, nativeCall } from '@/services/native'
 
+import { modService, nativeCall } from '@/services/native'
 import { createPiClient } from '@/services/pi/client'
+import { pendingSubmission } from '@/services/pi/pendingSubmission'
 import { emptyChat, reduceRecord, restoreChat } from '@/services/pi/reducer'
 import { useProjectsStore } from '@/stores/projects'
 
@@ -13,6 +15,11 @@ import { useProjectsStore } from '@/stores/projects'
 export function createSessionRuntime() {
   const client = createPiClient()
   const initialized = shallowRef(false)
+  const pendingInput = shallowRef<PendingSubmission>()
+  const uncertain = shallowRef(false)
+  const runtimeConfirmed = shallowRef(false)
+  const pendingStatus = shallowRef<SubmissionResult['status']>('unknown')
+  const connectionError = client.connectionError
   const attachments = shallowRef<PromptAttachment[]>([])
   const steeringInputs = shallowRef<SteeringInput[]>([])
   const stopping = shallowRef(false)
@@ -46,12 +53,12 @@ export function createSessionRuntime() {
   const startedAt = shallowRef<number>()
   const endedAt = shallowRef<number>()
   const readOnly = shallowRef(false)
-  const canSteer = computed(() => client.active.value && !submitting.value && !compacting.value && !stopping.value && !steeringSubmitting.value && !readOnly.value)
+  const canSteer = computed(() => runtimeConfirmed.value && client.active.value && !submitting.value && !compacting.value && !stopping.value && !steeringSubmitting.value && !readOnly.value && !client.synchronizing.value && !uncertain.value)
   const restartAvailable = shallowRef(false)
   const loadedSkills = shallowRef<string[]>([])
   let abortTimer: ReturnType<typeof setTimeout> | undefined
   const working = computed(() => submitting.value || client.active.value || client.submissionState.value === 'running' || client.submissionState.value === 'queued')
-  const busy = computed(() => working.value || compacting.value || manualCompaction.value || switching.value || changingThinking.value || changingModel.value)
+  const busy = computed(() => (!readOnly.value && !runtimeConfirmed.value) || uncertain.value || client.synchronizing.value || working.value || compacting.value || manualCompaction.value || switching.value || changingThinking.value || changingModel.value)
   let statsPending = false
   let statsAgain = false
   let statsEpoch = 0
@@ -73,6 +80,11 @@ export function createSessionRuntime() {
   }
   function receive(event: PiEnvelope): void {
     const record = event.record
+    if (event.kind === 'record' && record.type === 'message_end' && record.message && (record.message as { role?: string }).role === 'user' && record.inputId === pendingInput.value?.requestId) {
+      void clearPending().catch((cause) => {
+        error.value = cause.message
+      })
+    }
     if (event.kind === 'task' && record.type === 'project_memory_updated' && !readOnly.value && event.modId === modId.value) {
       memoryRevision.value += 1
     }
@@ -279,8 +291,101 @@ export function createSessionRuntime() {
   }
   client.subscribe(receive)
 
+  async function clearPending(): Promise<void> {
+    const value = pendingInput.value
+    if (!value) {
+      return
+    }
+    await pendingSubmission.remove(value.modId, value.sessionId, value.requestId)
+    if (pendingInput.value?.requestId === value.requestId) {
+      pendingInput.value = undefined
+      uncertain.value = false
+    }
+  }
+  function pendingMessage(value: PendingSubmission) {
+    return { id: value.requestId, role: 'user' as const, parts: [{ type: 'text' as const, text: value.message }, ...value.images], timestamp: value.timestamp, final: false, inputStatus: 'unknown' }
+  }
+  function restoreSnapshot(value: RuntimeSnapshot, full: boolean): void {
+    flush()
+    if (full) {
+      let next = restoreChat(value.messages)
+      for (const event of value.tools) {
+        next = reduceRecord(next, event.record)
+      }
+      const local = chat.value.messages.filter(message => !message.final && ['unknown', 'failed', 'accepted'].includes(message.inputStatus ?? ''))
+      for (const message of local) {
+        if (!next.messages.some(item => item.id === message.id || (message.inputId && item.inputId === message.inputId))) {
+          next.messages.push(message)
+        }
+      }
+      const pending = pendingInput.value
+      if (pending && !next.messages.some(message => message.id === pending.requestId || message.inputId === pending.requestId)) {
+        next.messages.push(pendingMessage(pending))
+      }
+      chat.value = next
+    }
+    if (!value.running) {
+      // 使用后端任务终态完成展示清理；无进程不能推断为成功。
+      chat.value = reduceRecord(chat.value, { type: 'agent_settled', aborted: value.task?.status !== 'finished' })
+    }
+    task.value = value.task?.context
+    stopping.value = value.stopping
+    compacting.value = value.compacting
+    if (value.task) {
+      startedAt.value = Date.parse(value.task.context.createdAt)
+      endedAt.value = value.task.finishedAt ? Date.parse(value.task.finishedAt) : undefined
+    }
+    if (value.running) {
+      activity.value = value.stopping ? '正在停止…' : value.compacting ? '正在压缩上下文' : value.active ? '正在执行任务' : '等待模型响应…'
+      lastActivityAt.value = Date.now()
+    }
+  }
+  async function reconcileSubmission(): Promise<SubmissionResult | undefined> {
+    const value = pendingInput.value
+    if (!value) {
+      uncertain.value = false
+      return
+    }
+    const result = await nativeCall<SubmissionResult>('read_submission_result', { modId: value.modId, sessionId: value.sessionId, requestId: value.requestId })
+    pendingStatus.value = result.status
+    uncertain.value = result.status === 'unknown' || result.status === 'pending'
+    if (result.status === 'accepted' && result.task) {
+      const matched = chat.value.messages.some(message => message.inputId === value.requestId && message.final)
+      if (matched) {
+        await clearPending()
+      }
+      else {
+        chat.value = { ...chat.value, messages: chat.value.messages.map(message => message.id === value.requestId ? { ...message, taskId: result.task!.context.taskId, inputStatus: 'accepted', error: result.task!.status === 'failed' ? (result.error || '任务执行失败，请查看执行过程') : undefined } : message) }
+      }
+    }
+    if (result.status === 'rejected') {
+      chat.value = { ...chat.value, messages: chat.value.messages.map(message => message.id === value.requestId ? { ...message, inputStatus: 'failed', error: result.error || '需求未被接收' } : message) }
+    }
+    return result
+  }
+  async function recover(force = false): Promise<SubmissionResult | undefined> {
+    if (readOnly.value || !sessionId.value) {
+      return
+    }
+    const attach = force || client.connection.value !== 'connected'
+    runtimeConfirmed.value = false
+    try {
+      await client.synchronize(attach, value => restoreSnapshot(value, attach))
+    }
+    catch (cause) {
+      if (attach || client.connection.value !== 'error') {
+        throw cause
+      }
+      await client.synchronize(true, value => restoreSnapshot(value, true))
+    }
+    runtimeConfirmed.value = true
+    const result = await reconcileSubmission()
+    await refreshInputs()
+    return result
+  }
   async function open(projectId: string, id?: string, historyOnly = false): Promise<void> {
     switching.value = true
+    runtimeConfirmed.value = false
     try {
       flush()
       chat.value = emptyChat()
@@ -316,6 +421,11 @@ export function createSessionRuntime() {
       contextUsage.value = metadata.contextUsage ? { ...metadata.contextUsage, historical: true } : undefined
       applyModel(metadata.modelState)
       client.select(projectId, targetId, metadata.generation)
+      pendingInput.value = await pendingSubmission.read(projectId, targetId)
+      uncertain.value = !!pendingInput.value
+      if (!historyOnly) {
+        await recover(true)
+      }
       await refreshInputs()
       initialized.value = true
     }
@@ -471,7 +581,7 @@ export function createSessionRuntime() {
   }
 
   /** 先显示本地提交，再保存草稿和启动任务；pi 用户事件沿用占位 ID。 */
-  async function send(requirement: string, images: ImageInput[] = [], saveDraft?: () => Promise<boolean>): Promise<void> {
+  async function send(requirement: string, images: ImageInput[] = [], saveDraft?: () => Promise<boolean>, original?: { text: string, attachments: PromptAttachment[] }): Promise<void> {
     if (readOnly.value) {
       throw new Error('此会话只能查看历史，请新建会话')
     }
@@ -480,6 +590,12 @@ export function createSessionRuntime() {
     }
     if (images.length && !modelState.value.definition?.input.includes('image')) {
       throw new Error('当前模型不支持图片，请移除图片附件或切换模型')
+    }
+    if (pendingInput.value) {
+      throw new Error('请先核对并处理保留的提交内容')
+    }
+    if (!runtimeConfirmed.value) {
+      throw new Error('会话状态尚未确认，请重新连接后再提交')
     }
     if (working.value) {
       await steer(requirement, images, saveDraft)
@@ -493,6 +609,7 @@ export function createSessionRuntime() {
     error.value = ''
     flush()
     const localId = crypto.randomUUID()
+    const submission: PendingSubmission = { requestId: localId, modId: modId.value, sessionId: sessionId.value, text: original?.text ?? requirement, message: requirement, attachments: original?.attachments ?? [], images, timestamp: Date.now() }
     startedAt.value = Date.now()
     endedAt.value = undefined
     activity.value = '正在准备开发环境'
@@ -502,11 +619,42 @@ export function createSessionRuntime() {
       if (saveDraft && !await saveDraft()) {
         throw new Error('需求保存失败，请重试')
       }
-      task.value = await client.prompt(modId.value, sessionId.value, requirement, thinkingLevel.value, images)
+      await pendingSubmission.save(JSON.parse(JSON.stringify(submission)))
+      pendingInput.value = submission
+      task.value = await client.prompt(modId.value, sessionId.value, requirement, thinkingLevel.value, images, localId)
+      pendingStatus.value = 'accepted'
+      uncertain.value = false
+      // 收到正常提交回执后仍保留输入，直到用户消息确认已进入历史。
+      if (chat.value.messages.some(message => message.inputId === localId && message.final)) {
+        await clearPending()
+      }
       void refreshStats()
     }
     catch (cause) {
       flush()
+      if (pendingInput.value?.requestId === localId) {
+        try {
+          const result = await recover()
+          if (!pendingInput.value || result?.status === 'accepted') {
+            error.value = result?.task?.status === 'failed' ? (result.error || '任务执行失败，请查看执行过程') : ''
+            return
+          }
+          if (result?.status === 'rejected') {
+            await clearPending()
+          }
+          else {
+            uncertain.value = true
+            throw new Error('提交结果未确认，请重新连接核对；输入已保留')
+          }
+        }
+        catch (recoveryError) {
+          if (pendingInput.value) {
+            uncertain.value = true
+            chat.value = { ...chat.value, messages: chat.value.messages.map(message => message.id === localId ? { ...message, inputStatus: 'unknown', error: '提交结果未确认，输入已保留' } : message) }
+            throw new Error(`提交结果未确认；${(recoveryError as Error).message}`)
+          }
+        }
+      }
       if (chat.value.pendingUserId === localId) {
         const uncertain = /超时|未确认/.test((cause as Error).message)
         chat.value = { ...chat.value, pendingUserId: uncertain ? localId : undefined, messages: chat.value.messages.map(message => message.id === localId ? { ...message, inputStatus: uncertain ? 'unknown' : 'failed', error: (cause as Error).message } : message) }
@@ -568,5 +716,5 @@ export function createSessionRuntime() {
     flush()
     await open(project, id)
   }
-  return { initialized, attachments, steeringInputs, stopping, canSteer, steeringSubmitting, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, changingModel, modelState, modelChangeError, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, open, send, abort, restart, flush, refreshStats, refreshModel, selectModel, setThinking, compact, close }
+  return { initialized, connectionError, pendingInput, pendingStatus, uncertain, recover, clearPending, attachments, steeringInputs, stopping, canSteer, steeringSubmitting, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, changingModel, modelState, modelChangeError, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, open, send, abort, restart, flush, refreshStats, refreshModel, selectModel, setThinking, compact, close }
 }

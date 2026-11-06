@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { Spinner } from '@/components/ui/spinner'
 import { useConfiguration } from '@/features/settings/useConfiguration'
 import { useVerification } from '@/features/verification/useVerification'
 import { modService, nativeCall } from '@/services/native'
@@ -57,7 +58,9 @@ const attachments = computed({ get: () => session.attachments, set: (value: Prom
   session.attachments = value
 } })
 const projects = useProjectsStore()
-const connectionIssue = computed(() => error.value || session.error || session.modelState?.error || configuration.error.value)
+const connectionIssue = computed(() => session.connectionError)
+const operationIssue = computed(() => error.value || session.error || session.modelState?.error || configuration.error.value)
+const displayedIssue = computed(() => connectionIssue.value || operationIssue.value)
 const modelConfigured = computed(() => {
   const selected = session.modelState
   if (!selected || selected.error || session.modelChangeError) {
@@ -152,10 +155,15 @@ async function openSession(id?: string, readOnly = false): Promise<void> {
 
 /** 重连只打开已选中的会话，不允许空 ID 触发新建。 */
 async function reconnect(): Promise<void> {
-  if (opening.value || session.busy || !reconnectId.value) {
+  if (opening.value || session.synchronizing || !reconnectId.value) {
     return
   }
-  await openSession(reconnectId.value, session.readOnly)
+  opening.value = true
+  try {
+    await session.recover(true)
+  }
+  catch (cause) { error.value = (cause as Error).message }
+  finally { opening.value = false }
 }
 
 watch(() => [String(route.params.modId), String(route.query.session ?? ''), String(route.query.new ?? '')], async ([id, requested, fresh]) => {
@@ -233,11 +241,11 @@ async function send(): Promise<void> {
   let restore = false
   error.value = ''
   try {
-    await target.send(message, images, submission.save)
+    await target.send(message, images, submission.save, { text: submitted, attachments: selected })
   }
   catch (cause) {
     const confirmed = target.chat.messages.some(item => !previousIds.has(item.id) && item.role === 'user' && (item.final || (item.inputStatus && !['submitted', 'failed', 'unknown'].includes(item.inputStatus))))
-    restore = !confirmed && !/超时|未确认/.test((cause as Error).message)
+    restore = !confirmed && !target.uncertain && !/超时|未确认/.test((cause as Error).message)
     if (restore) {
       target.attachments = [...selected, ...target.attachments.filter(file => !selected.some(sent => sent.id === file.id))]
     }
@@ -247,7 +255,7 @@ async function send(): Promise<void> {
   }
   finally {
     try {
-      const saved = await submission.finish(restore)
+      const saved = await submission.finish(restore, target.uncertain)
       if (!saved && !restore && session.selectedKey === submittingKey) {
         error.value = '消息已提交，草稿保存失败，请勿重复发送'
       }
@@ -256,6 +264,23 @@ async function send(): Promise<void> {
   }
 }
 
+/** 只恢复被明确拒绝的输入；新草稿存在时保留独立副本，避免覆盖。 */
+async function restorePendingInput(): Promise<void> {
+  const target = session.stateFor(session.modId, session.sessionId)
+  const value = target?.pendingInput
+  if (!target || !value || target.pendingStatus !== 'rejected') {
+    return
+  }
+  if (requirement.value && requirement.value !== value.text) {
+    error.value = '当前已有新草稿，请先保存或移走草稿，再恢复保留的提交'
+    return
+  }
+  requirement.value = value.text
+  target.attachments = [...value.attachments, ...target.attachments.filter(file => !value.attachments.some(original => original.id === file.id))]
+  if (await draft.flush()) {
+    await target.clearPending()
+  }
+}
 const handledRepair = new Set<string>()
 watch(() => [String(route.query.repair ?? ''), opening.value, loadingProject.value, verification.data.value.records] as const, async ([recordId, isOpening, isLoading, records]) => {
   if (!recordId || isOpening || isLoading || handledRepair.has(recordId) || session.modId !== project.value?.modId) {
@@ -308,25 +333,42 @@ onBeforeRouteUpdate(leave)
     <p v-if="project && session.task?.contextSnapshotId" class="shrink-0 px-4 py-2 text-xs text-muted-foreground">
       本轮使用项目记忆快照 {{ session.task.contextSnapshotId.slice(0, 8) }}
     </p>
-    <Alert v-if="connectionIssue" :role="runtimeClosed ? 'status' : 'alert'" :variant="runtimeClosed ? 'default' : 'destructive'" class="shrink-0">
+    <Alert v-if="displayedIssue" :role="runtimeClosed ? 'status' : 'alert'" :variant="runtimeClosed ? 'default' : 'destructive'" class="shrink-0">
       <Unplug v-if="runtimeClosed" />
-      <AlertTitle>{{ runtimeClosed ? '会话连接已断开' : '会话连接异常' }}</AlertTitle>
+      <AlertTitle>{{ connectionIssue ? (runtimeClosed ? '会话连接已断开' : '会话连接异常') : '会话操作提示' }}</AlertTitle>
       <AlertDescription class="flex flex-wrap items-center justify-between gap-3">
-        <span class="min-w-0 flex-1 break-words">{{ connectionIssue }}</span>
+        <span class="min-w-0 flex-1 break-words">{{ displayedIssue }}</span>
         <Button v-if="session.restartAvailable" variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 rounded-md text-xs" :disabled="opening" @click="session.restart().catch(cause => error = cause.message)">
           <RotateCw class="size-3.5" />重启运行时
         </Button>
-        <Button v-else-if="project && reconnectId" variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 rounded-md text-xs" :disabled="opening || session.busy" @click="reconnect">
+        <Button v-else-if="project && reconnectId && (connectionIssue || session.uncertain)" variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 rounded-md text-xs" :disabled="opening || session.synchronizing" @click="reconnect">
           <RotateCw class="size-3.5" />{{ opening ? '正在连接…' : '重新连接' }}
         </Button>
       </AlertDescription>
     </Alert>
+    <Alert v-if="session.pendingInput" class="shrink-0">
+      <AlertTitle>{{ session.uncertain ? '提交结果待确认' : session.pendingStatus === 'rejected' ? '提交未被接收' : '原始提交内容已保留' }}</AlertTitle>
+      <AlertDescription class="flex flex-col gap-2">
+        <span class="max-h-24 overflow-auto whitespace-pre-wrap break-words">{{ session.pendingInput.text }}</span>
+        <span v-if="session.pendingInput.attachments.length">附件：{{ session.pendingInput.attachments.map(file => file.name).join('、') }}</span>
+        <Button v-if="session.uncertain" variant="outline" size="sm" :disabled="opening || session.synchronizing" @click="reconnect">
+          核对提交结果
+        </Button>
+        <Button v-else-if="session.pendingStatus === 'rejected'" variant="outline" size="sm" @click="restorePendingInput">
+          恢复到输入框
+        </Button>
+        <Button v-else-if="session.pendingStatus === 'accepted'" variant="outline" size="sm" @click="session.clearPending().catch(cause => error = cause.message)">
+          已查看提交结果，关闭保留提示
+        </Button>
+      </AlertDescription>
+    </Alert>
     <p v-if="opening" class="px-5 py-3 text-xs text-muted-foreground">
-      正在恢复会话历史…
+      正在同步会话状态…
     </p>
     <MessageTimeline v-if="project && session.modId === project.modId && (session.chat.messages.length || session.working)" :key="`${session.modId}-${session.sessionId}`" :messages="session.chat.messages" :tools="session.chat.tools" :mod-id="String(route.params.modId)" :tasks="tasks.filter(item => item.context.sessionId === session.sessionId)" :working="session.working" :started-at="session.startedAt" :ended-at="session.endedAt" :activity="session.activity" :last-activity-at="session.lastActivityAt" :feedback-drafts="pendingFeedback" :verification-records="verification.data.value.records" @feedback-changed="verification.refresh" />
-    <div v-else-if="loadingProject || opening" role="status" class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-      正在加载会话…
+    <div v-else-if="loadingProject || opening" role="status" class="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+      <Spinner aria-hidden="true" />
+      <span>正在加载会话…</span>
     </div>
     <Empty v-else class="min-h-0 overflow-auto rounded-none">
       <EmptyHeader>
@@ -361,10 +403,5 @@ onBeforeRouteUpdate(leave)
       {{ project?.archived ? '项目已归档，仅可查看；在全部项目的“已归档项目”中恢复后继续制作。' : '此会话使用旧的能力上下文，只能查看历史。创建新会话继续开发。' }}
     </p>
     <ChatComposer v-else-if="project" v-model="requirement" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-steer="session.canSteer && !sending" :stopping="session.stopping" :busy="session.busy || sending || opening" :configured="modelConfigured && !opening" :providers="status?.providers || []" :model-state="session.modelState" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @model="session.selectModel" @thinking="session.setThinking" @compact="session.compact" />
-    <p v-if="project && status && !modelConfigured && !session.readOnly" class="px-5 pb-3 text-xs text-muted-foreground">
-      请在输入框选择可用模型，或在<RouterLink to="/settings" class="underline underline-offset-2">
-        设置页
-      </RouterLink>完善模型服务和 Key；当前需求仍会保存。
-    </p>
   </div>
 </template>

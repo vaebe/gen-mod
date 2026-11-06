@@ -46,6 +46,7 @@ pub fn run() {
             storage::repository::list_recovery_issues,
             pi::bridge::create_mod_session, pi::bridge::connect_pi, pi::bridge::send_pi_command,
             pi::bridge::disconnect_pi, pi::bridge::start_mod_task,
+            pi::bridge::reserve_pi_subscription, pi::bridge::read_pi_runtime, pi::submissions::read_submission_result,
             pi::bridge::steer_mod_task, storage::repository::list_steering_inputs,
             config::get_configuration, config::save_configuration, config::open_configuration_directory,
             changes::list_task_operations, changes::list_task_changes, changes::get_task_file_diff,

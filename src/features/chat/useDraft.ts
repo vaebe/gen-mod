@@ -114,14 +114,14 @@ export function useDraft() {
       }
       return result
     }
-    async function finish(restore: boolean): Promise<boolean> {
+    async function finish(restore: boolean, preserve = false): Promise<boolean> {
       try {
         const unchanged = id === projectId && targetSession === sessionId && (revisions.get(key) ?? 0) === revision
         if (restore && unchanged) {
           requirement.value = text
         }
         // 清理只匹配本次快照，不覆盖其他来源已写入的草稿。
-        if (!restore && unchanged && targetSession) {
+        if (!restore && !preserve && unchanged && targetSession) {
           saving.value = true
           try {
             projects.upsert(await modService.saveDraft(id, '', targetSession, text))
@@ -139,7 +139,7 @@ export function useDraft() {
         submissionPending = undefined
         release()
       }
-      return flush()
+      return preserve ? true : flush()
     }
     return { save, finish }
   }

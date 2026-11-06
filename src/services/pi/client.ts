@@ -1,4 +1,4 @@
-import type { PiEnvelope, PiRecord } from './types'
+import type { PiEnvelope, PiRecord, RuntimeSnapshot } from './types'
 import type { ModelSelection, SessionModelState } from '@/contracts/config'
 import type { ImageInput, ThinkingLevel } from '@/contracts/session'
 import type { TaskContext } from '@/contracts/task'
@@ -13,6 +13,13 @@ export function createPiClient() {
   const connection = shallowRef<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected')
   const submissionState = shallowRef<'idle' | 'submitting' | 'running' | 'queued' | 'finished' | 'failed'>('idle')
   const active = shallowRef(false)
+  const synchronizing = shallowRef(false)
+  const connectionError = shallowRef('')
+  const lastSequence = shallowRef(0)
+  let subscription = 0
+  let stateBoundary = 0
+  let buffer: PiEnvelope[] | undefined
+  let recovery: Promise<RuntimeSnapshot> | undefined
   const generation = shallowRef(0)
   const pending = new Map<string, Pending>()
   const listeners = new Set<(event: PiEnvelope) => void>()
@@ -28,29 +35,54 @@ export function createPiClient() {
     pending.clear()
   }
 
+  function advanceGeneration(next: number): void {
+    if (next > generation.value) {
+      generation.value = next
+      subscription = 0
+      lastSequence.value = 0
+      stateBoundary = 0
+    }
+  }
   function receive(event: PiEnvelope): void {
     if (event.modId !== identity.modId || (identity.sessionId && event.sessionId !== identity.sessionId)) {
       return
     }
-    identity.sessionId = event.sessionId
+    if (buffer) {
+      buffer.push(event)
+      return
+    }
     if (event.generation < Math.max(generation.value, minimumGeneration)) {
       return
     }
+    if (event.generation === generation.value && (event.subscription !== subscription || event.sequence <= lastSequence.value)) {
+      return
+    }
+    if (event.generation > generation.value) {
+      lastSequence.value = 0
+      stateBoundary = 0
+      subscription = event.subscription
+    }
+    lastSequence.value = event.sequence
+    identity.sessionId = event.sessionId
     if (event.generation > generation.value) {
       generation.value = event.generation
     }
     const record = event.record
-    if (event.kind === 'exit') {
+    const historicalState = event.sequence <= stateBoundary
+    if (event.kind === 'exit' && !historicalState) {
       connection.value = 'disconnected'
+      if (record.reason === 'unexpected') {
+        connectionError.value = 'pi 进程意外退出，任务已中断'
+      }
       active.value = false
       submissionState.value = 'finished'
       rejectAll('pi 进程已退出')
     }
     else if (event.kind === 'record') {
-      if (record.type === 'agent_start') {
+      if (record.type === 'agent_start' && !historicalState) {
         active.value = true
       }
-      if (record.type === 'agent_settled') {
+      if (record.type === 'agent_settled' && !historicalState) {
         settledSeen = true
         active.value = false
         if (submissionState.value !== 'submitting') {
@@ -69,6 +101,10 @@ export function createPiClient() {
         }
       }
     }
+    // 状态快照可以先于旧通道消息抵达；保留旧正文/工具记录，只抑制已被快照取代的状态。
+    if (historicalState && (event.kind === 'exit' || ['agent_start', 'agent_settled', 'compaction_start', 'compaction_end', 'task_started'].includes(record.type) || (record.type === 'response' && record.command === 'get_state'))) {
+      return
+    }
     for (const listener of listeners) {
       listener(event)
     }
@@ -83,6 +119,7 @@ export function createPiClient() {
   function select(modId: string, sessionId: string, savedGeneration: number): void {
     identity = { modId, sessionId }
     generation.value = savedGeneration
+    lastSequence.value = 0
   }
   async function connect(modId: string, sessionId?: string): Promise<void> {
     identity = { modId, sessionId: sessionId ?? '' }
@@ -91,7 +128,7 @@ export function createPiClient() {
     connection.value = 'connecting'
     try {
       const result = await nativeCall<{ modId: string, sessionId: string, generation: number }>('connect_pi', { modId, sessionId, onEvent: channel() })
-      generation.value = result.generation
+      advanceGeneration(result.generation)
       identity = result
       connection.value = 'connected'
     }
@@ -133,7 +170,7 @@ export function createPiClient() {
         connection.value = 'disconnected'
         return result.modelState
       }
-      generation.value = result.generation
+      advanceGeneration(result.generation)
       connection.value = 'connected'
       const state = await request('get_state')
       const model = state.data?.model as { provider?: string, id?: string } | undefined
@@ -154,13 +191,13 @@ export function createPiClient() {
   }
 
   /** 原生创建并绑定任务后才提交 prompt，普通 RPC 不能绕开此入口。 */
-  async function prompt(modId: string, sessionId: string, requirement: string, thinkingLevel: ThinkingLevel, images: ImageInput[] = []): Promise<TaskContext> {
+  async function prompt(modId: string, sessionId: string, requirement: string, thinkingLevel: ThinkingLevel, images: ImageInput[] = [], requestId = crypto.randomUUID()): Promise<TaskContext> {
     rejectAll('正在开始新任务')
     minimumGeneration = generation.value + 1
     submissionState.value = 'submitting'
     settledSeen = false
     connection.value = 'connecting'
-    const id = crypto.randomUUID()
+    const id = requestId
     let response: Promise<PiRecord> | undefined
     try {
       // 原生在返回前可能已发响应，先注册 pending。
@@ -174,7 +211,7 @@ export function createPiClient() {
       // 捕获提前失败，避免等待原生启动期间产生未处理拒绝。
       void response.catch(() => undefined)
       const context = await nativeCall<TaskContext>('start_mod_task', { modId, sessionId, requirement, thinkingLevel, images, requestId: id, onEvent: channel() })
-      generation.value = context.generation
+      advanceGeneration(context.generation)
       connection.value = 'connected'
       const record = await response
       const disposition = record.data?.disposition
@@ -243,11 +280,75 @@ export function createPiClient() {
     active.value = false
     submissionState.value = 'idle'
   }
+  function applySnapshot(value: RuntimeSnapshot, full: boolean): void {
+    advanceGeneration(value.generation)
+    minimumGeneration = value.generation
+    if (value.connected || full) {
+      subscription = value.subscription
+    }
+    stateBoundary = value.sequence
+    if (full) {
+      lastSequence.value = value.sequence
+    }
+    active.value = value.active
+    submissionState.value = value.running ? 'running' : 'finished'
+    connection.value = value.connected ? 'connected' : 'disconnected'
+  }
+  /** 同一 runtime 的恢复串行化；快照应用之后再交付边界之后的事件。 */
+  async function synchronize(attach: boolean, restore: (value: RuntimeSnapshot) => void): Promise<RuntimeSnapshot> {
+    if (recovery) {
+      return recovery
+    }
+    synchronizing.value = true
+    const operation = (async () => {
+      if (attach) {
+        buffer = []
+      }
+      try {
+        const reservation = attach ? await nativeCall<{ generation: number, ticket: number }>('reserve_pi_subscription', identity) : undefined
+        const value = await nativeCall<RuntimeSnapshot>('read_pi_runtime', { ...identity, attachGeneration: reservation?.generation, ticket: reservation?.ticket, onEvent: channel() })
+        if (!attach && value.connected && (value.generation !== generation.value || value.subscription !== subscription)) {
+          connection.value = 'error'
+          throw new Error('会话订阅已变化，需要重新附着')
+        }
+        // 健康订阅查询期间已到达的事件优先于旧快照。
+        if (attach || !value.connected || value.generation > generation.value || value.sequence >= lastSequence.value) {
+          applySnapshot(value, attach)
+          restore(value)
+        }
+        connectionError.value = ''
+        return value
+      }
+      catch (cause) {
+        connectionError.value = (cause as Error).message
+        throw cause
+      }
+      finally {
+        const events = buffer
+        buffer = undefined
+        if (events) {
+          for (const event of events) {
+            receive(event)
+          }
+        }
+      }
+    })()
+    recovery = operation
+    try {
+      return await operation
+    }
+    finally {
+      if (recovery === operation) {
+        recovery = undefined
+        synchronizing.value = false
+      }
+    }
+  }
   function subscribe(listener: (event: PiEnvelope) => void): () => void {
     listeners.add(listener)
     return () => {
       listeners.delete(listener)
     }
   }
-  return { connection, submissionState, active, generation, select, selectModel, connect, prompt, steer, request, disconnect, subscribe }
+  return { connection, connectionError, synchronizing, lastSequence, synchronize, submissionState, active, generation, select, selectModel, connect, prompt, steer, request, disconnect, subscribe }
 }

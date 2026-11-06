@@ -24,7 +24,7 @@ export interface CommandReceipt {
 export interface TaskRecord {
   finishedAt?: string | null
   context: TaskContext
-  status: 'preparing' | 'running' | 'finished' | 'failed' | 'cancelled'
+  status: 'preparing' | 'running' | 'stopping' | 'finished' | 'failed' | 'cancelled' | 'interrupted'
   commands: CommandReceipt[]
   registeredVersionId?: string
 }

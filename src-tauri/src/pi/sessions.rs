@@ -45,7 +45,9 @@ pub fn read_session_history(app: tauri::AppHandle, mod_id: String, session_id: S
     #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
     let result = command.output().map_err(|e| e.to_string())?;
     if !result.status.success() { return Err("pi SDK 无法读取会话历史，请检查会话文件是否损坏".into()); }
-    serde_json::from_slice(&result.stdout).map_err(|_| "pi SDK 返回了无效的历史数据".into())
+    let mut history = serde_json::from_slice(&result.stdout).map_err(|_| "pi SDK 返回了无效的历史数据".to_string())?;
+    super::submissions::annotate_history(&crate::storage::database::connect(&app)?, &mod_id, &session_id, &mut history)?;
+    Ok(history)
 }
 
 #[tauri::command]

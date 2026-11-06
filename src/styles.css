@@ -135,20 +135,21 @@
     font-weight: 600;
     letter-spacing: -0.02em;
     line-height: 1.3;
+    text-wrap: balance;
   }
   .studio-project-card {
     position: relative;
     overflow: hidden;
     background: var(--card);
     box-shadow: none;
-    transition: border-color 160ms ease;
+    transition: border-color 160ms ease-out;
   }
   .studio-project-card:hover,
   .studio-project-card:focus-within {
     border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
   }
   .studio-composer {
-    transition: border-color 160ms ease;
+    transition: border-color 160ms ease-out;
   }
   .studio-composer:focus-within {
     border-color: color-mix(in srgb, var(--primary) 50%, var(--border));

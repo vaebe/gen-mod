@@ -120,7 +120,7 @@ function pasteFiles(event: ClipboardEvent): void {
                 <Plus class="size-4" />
               </Button>
             </PopoverTrigger>
-            <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title="Enter 发送，Shift + Enter 换行">{{ working ? '可发送补充要求' : 'Enter 发送 · Shift + Enter 换行' }}</span>
+            <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground" title="Enter 发送，Shift + Enter 换行">{{ working ? '可发送补充要求' : 'Enter 发送 · Shift + Enter 换行' }}</span>
             <ContextUsageIndicator :usage="contextUsage" :compacting="compacting" />
             <ModelSelector :providers="providers" :model-state="modelState" :thinking-level="thinkingLevel" :thinking-levels="thinkingLevels" :disabled="busy || !modelState" :thinking-disabled="busy || !configured" @select="$emit('model', $event)" @thinking="$emit('thinking', $event)" />
             <Button v-if="working || compacting" size="icon" class="size-8 rounded-full" :disabled="stopping" aria-label="停止会话" title="停止会话" @click="$emit('cancel')">
@@ -130,13 +130,13 @@ function pasteFiles(event: ClipboardEvent): void {
               <ArrowUp class="size-4" />
             </Button>
           </div>
-          <p v-if="error || imageError" role="alert" class="mt-2 text-xs text-destructive">
+          <p v-if="error || imageError" role="alert" class="mt-2 break-words text-xs leading-5 text-destructive">
             {{ error || imageError }}
           </p>
         </div>
       </PopoverAnchor>
       <PopoverContent side="top" align="start" :side-offset="8" class="w-(--reka-popover-trigger-width) max-h-80 overflow-y-auto p-1.5" @open-auto-focus="slashMenu && $event.preventDefault()" @interact-outside="slashMenu && ($event.target as HTMLElement).closest('[data-slot=textarea]') && $event.preventDefault()">
-        <Button v-for="(action, index) in actions" :key="action.id" type="button" :disabled="action.disabled" variant="ghost" class="h-auto w-full justify-start gap-2.5" :class="slashMenu && selectedAction === index && 'bg-muted'" @click="runAction(action.id)">
+        <Button v-for="(action, index) in actions" :key="action.id" type="button" :disabled="action.disabled" variant="ghost" class="h-auto min-w-0 w-full justify-start gap-2.5" :class="slashMenu && selectedAction === index && 'bg-muted'" @click="runAction(action.id)">
           <component :is="action.icon" class="size-4 shrink-0 text-muted-foreground" /><span class="shrink-0 text-sm">{{ action.label }}</span><span class="min-w-0 truncate text-sm text-muted-foreground">{{ action.description }}</span>
         </Button>
         <p v-if="!actions.length" class="px-3 py-2 text-xs text-muted-foreground">
