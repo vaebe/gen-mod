@@ -37,6 +37,7 @@ fn validate_name(name: &str) -> Result<String, String> {
 pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name: String, game_id: String, requirement: String) -> Result<ModProject, String> {
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
     let name = validate_name(&name)?;
+    crate::games::ensure_supported(&app, &game_id)?;
     let selected = crate::skills::registry::resolve_for_game(&app, &game_id)?;
     let game_skill_name = selected.iter().find(|view|view.source=="official"&&view.definition.category=="game").ok_or("缺少官方游戏 Skill")?.definition.name.clone();
     let id = uuid::Uuid::new_v4().to_string();

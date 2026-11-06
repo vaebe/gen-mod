@@ -2,6 +2,7 @@
 import type { ModProject } from '@/contracts/mod'
 import { ArrowUpRight, Folder, Plus } from '@lucide/vue'
 import { defineAsyncComponent, shallowRef } from 'vue'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -17,25 +18,25 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
 </script>
 
 <template>
-  <section class="h-full overflow-auto px-6 py-10 lg:px-12">
-    <div class="mx-auto max-w-4xl">
-      <div class="flex items-start justify-between gap-4">
+  <section class="studio-page">
+    <div class="studio-content">
+      <header class="flex flex-wrap items-start justify-between gap-6 border-b pb-8">
         <div>
-          <p class="mb-3 text-xs tracking-[0.15em] text-muted-foreground">
-            你的创作空间
-          </p><h1 class="text-2xl font-semibold tracking-tight">
-            MOD 项目
-          </h1><p class="mt-2 text-sm text-muted-foreground">
-            从一个想法开始，保留每次修改与交付。
+          <p class="studio-eyebrow">
+            MOD WORKSHOP
+          </p><h1 class="studio-title">
+            把想法，做成可玩的 MOD。
+          </h1><p class="mt-3 text-sm leading-6 text-muted-foreground">
+            从第一句描述，到每一次修改与交付。这里是你的创作工作台。
           </p>
         </div><div class="flex flex-wrap gap-2">
-          <Button variant="outline" @click="archivedOpen = true">
+          <Button variant="ghost" class="text-muted-foreground" @click="archivedOpen = true">
             已归档项目
           </Button><Button @click="createOpen = true">
             <Plus class="size-4" />新建 MOD
           </Button>
         </div>
-      </div>
+      </header>
       <p v-if="projects.notice" role="status" class="mt-4 text-sm text-muted-foreground">
         {{ projects.notice }}
       </p>
@@ -47,9 +48,9 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
       <p v-else-if="projects.loading" class="mt-8 text-sm text-muted-foreground">
         正在读取本地项目…
       </p>
-      <Empty v-else-if="!projects.projects.length" class="mt-10 border">
+      <Empty v-else-if="!projects.projects.length" class="studio-empty mt-8 min-h-80 rounded-xl border border-dashed">
         <EmptyHeader>
-          <EmptyMedia variant="icon">
+          <EmptyMedia variant="icon" class="bg-primary/10 text-primary">
             <Folder />
           </EmptyMedia><EmptyTitle>
             第一个 MOD，从这里开始
@@ -57,31 +58,41 @@ const ArchivedProjectsDialog = defineAsyncComponent(() => import('./ArchivedProj
             描述想改变的游戏体验，选择 skill，让 AI 协助完成源码和交付。
           </EmptyDescription>
         </EmptyHeader><EmptyContent>
-          <Button variant="outline" @click="createOpen = true">
+          <Button @click="createOpen = true">
             创建项目
           </Button>
         </EmptyContent>
       </Empty>
-      <div v-else class="mt-8 grid gap-3 md:grid-cols-2">
-        <Card v-for="project in projects.projects" :key="project.modId" class="flex h-full flex-col">
-          <RouterLink :to="`/mods/${project.modId}/chat`" class="flex flex-1 flex-col gap-6 rounded-xl focus-visible:outline focus-visible:outline-ring">
-            <CardHeader>
-              <div class="flex items-center gap-3">
-                <Folder class="size-4 text-muted-foreground" /><CardTitle class="truncate">
-                  {{ project.name }}
-                </CardTitle><ArrowUpRight class="ml-auto size-4 text-muted-foreground" />
-              </div>
-            </CardHeader><CardContent class="flex-1">
-              <CardDescription class="line-clamp-2 min-h-10">
-                {{ project.draftRequirement || '打开项目，继续描述你的需求。' }}
-              </CardDescription>
-            </CardContent>
-          </RouterLink><CardFooter class="justify-between gap-3 text-xs text-muted-foreground">
-            <span>{{ project.gameSkillName }} · {{ project.versions.length }} 个交付版本</span><Button variant="ghost" size="sm" @click="removing = project">
-              移除
-            </Button>
-          </CardFooter>
-        </Card>
+      <div v-else class="mt-7">
+        <div class="mb-4 flex items-center gap-2.5">
+          <h2 class="text-sm font-medium">
+            项目库
+          </h2>
+          <Badge variant="secondary" class="font-mono text-xs">
+            {{ projects.projects.length }}
+          </Badge>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <Card v-for="project in projects.projects" :key="project.modId" class="studio-project-card flex h-full flex-col gap-0 rounded-xl py-0">
+            <RouterLink :to="`/mods/${project.modId}/chat`" class="group flex flex-1 flex-col gap-4 rounded-xl pt-5 focus-visible:outline focus-visible:outline-ring">
+              <CardHeader class="px-5 pt-0 pb-0">
+                <div class="flex items-center gap-3">
+                  <span class="flex size-10 shrink-0 items-center justify-center rounded-lg border border-primary/15 bg-primary/8 text-primary"><Folder class="size-5" /></span><CardTitle class="min-w-0 truncate text-base">
+                    {{ project.name }}
+                  </CardTitle><ArrowUpRight class="ml-auto size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+                </div>
+              </CardHeader><CardContent class="flex-1 px-5 pb-5">
+                <CardDescription class="line-clamp-2 min-h-12 text-sm leading-6">
+                  {{ project.draftRequirement || '打开项目，继续描述你的需求。' }}
+                </CardDescription>
+              </CardContent>
+            </RouterLink><CardFooter class="justify-between gap-3 border-t bg-background/25 px-5 py-3 text-xs text-muted-foreground">
+              <span class="min-w-0"><span class="block truncate" :title="project.gameSkillName">{{ project.gameSkillName }}</span><span class="mt-1 block font-mono text-[11px]">{{ project.versions.length }} 个交付版本</span></span><Button variant="ghost" size="sm" @click="removing = project">
+                移除
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
       </div>
     </div><NewModDialog v-model:open="createOpen" />
     <RemoveProjectDialog v-model="removing" />

@@ -94,12 +94,15 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="h-full overflow-auto px-5 py-8 sm:px-8">
-    <div class="mx-auto max-w-3xl space-y-6">
-      <header>
-        <h1 class="text-xl font-semibold">
+  <section class="studio-page">
+    <div class="studio-content space-y-6">
+      <header class="border-b pb-8">
+        <p class="studio-eyebrow">
+          PREFERENCES
+        </p>
+        <h1 class="studio-title">
           设置
-        </h1><p class="mt-2 text-sm leading-6 text-muted-foreground">
+        </h1><p class="mt-3 text-sm leading-6 text-muted-foreground">
           管理模型服务和跨项目长期记忆。
         </p>
       </header>

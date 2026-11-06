@@ -127,12 +127,44 @@ pub fn list_on(official_root:&Path,imported_root:&Path)->Result<Vec<SkillView>,S
     }
     views.sort_by(|a,b|a.definition.name.cmp(&b.definition.name));Ok(views)
 }
-pub fn list(app:&tauri::AppHandle)->Result<Vec<SkillView>,String>{list_on(&super::official::root(app)?,&user_root(app)?)}
+fn builtin_definitions(app: &tauri::AppHandle) -> Result<Vec<SkillDefinition>, String> {
+    let root = crate::local_resources::root(app)?.join("skills");
+    let file = root.join("registry.json");
+    paths::reject_redirect(&root)?;
+    paths::reject_redirect(&file)?;
+    let mut definitions: Vec<SkillDefinition> = serde_json::from_slice(&fs::read(file).map_err(|error| error.to_string())?)
+        .map_err(|error| format!("内置能力清单无效：{error}"))?;
+    for definition in &mut definitions {
+        definition.path = root.join(crate::changes::relative_path(&definition.path)?).to_string_lossy().into_owned();
+    }
+    Ok(definitions)
+}
+
+pub fn list(app: &tauri::AppHandle) -> Result<Vec<SkillView>, String> {
+    let mut views = list_on(&super::official::root(app)?, &user_root(app)?)?;
+    let user = user_registry(app)?;
+    for definition in builtin_definitions(app)? {
+        if let Some(existing) = views.iter().find(|view| view.definition.name == definition.name) {
+            if existing.source != "official" { return Err(format!("导入名称与内置官方 Skill 冲突：{}", definition.name)); }
+            // 有效的已下载版本优先，内容指纹及旧会话快照保持原样。
+            if existing.error.is_none() { continue; }
+        }
+        let (content_hash, scripts, error) = match validate(&definition, Path::new(&definition.path)) {
+            Ok((hash, scripts)) => (hash, scripts, None),
+            Err(error) => (String::new(), vec![], Some(format!("内置 Skill 无效：{error}"))),
+        };
+        views.retain(|view| view.definition.name != definition.name);
+        let enabled = !user.disabled.contains(&definition.name);
+        views.push(SkillView { definition, source: "official".into(), enabled, content_hash, scripts, error });
+    }
+    views.sort_by(|a, b| a.definition.name.cmp(&b.definition.name));
+    Ok(views)
+}
 pub fn resolve_views_for_game(views:Vec<SkillView>,game_id:&str)->Result<Vec<SkillView>,String>{
     let selected:Vec<_>=views.into_iter().filter(|view|view.enabled&&(view.definition.category=="common"||view.definition.game_id.as_deref()==Some(game_id))).collect();
     for view in &selected {if let Some(error)=&view.error{return Err(format!("能力 {} 无效：{error}",view.definition.name));}}
     if !selected.iter().any(|view|view.source=="official"&&view.definition.category=="game"&&view.definition.game_id.as_deref()==Some(game_id)){
-        return Err("请先确认下载并启用该游戏的官方游戏 Skill".into());
+        return Err("请检查并启用该游戏的官方游戏 Skill".into());
     }
     Ok(selected)
 }
@@ -202,13 +234,12 @@ pub fn set_skill_enabled(app: tauri::AppHandle, state: tauri::State<mods::Storag
     mods::write_json(&root.join("registry.json"), &user)
     })
 }
-pub(super) fn validate_import_on(definition:&SkillDefinition,source:&Path,official_root:&Path,imported_root:&Path)->Result<(),String>{
+pub(super) fn validate_import_on(definition:&SkillDefinition,source:&Path,official_root:&Path,imported_root:&Path,games:&[crate::games::Game],builtin_names:&[String])->Result<(),String>{
     validate(definition,source)?;
-    let confirmed=super::official::confirmed_on(official_root)?;
-    if definition.category=="game"&&!confirmed.games.iter().any(|game|definition.game_id.as_deref()==Some(game.id.as_str())){
-        return Err("游戏 Skill 必须绑定已同步的官方游戏；导入不能创建游戏".into());
+    if definition.category=="game"&&!games.iter().any(|game|definition.game_id.as_deref()==Some(game.id.as_str())){
+        return Err("游戏 Skill 必须绑定本地清单中的游戏；导入不能创建游戏".into());
     }
-    if super::official::catalog_on(official_root)?.skills.iter().any(|skill|skill.name==definition.name){
+    if builtin_names.contains(&definition.name)||super::official::catalog_on(official_root)?.skills.iter().any(|skill|skill.name==definition.name){
         return Err("导入名称不能与官方 Skill 冲突".into());
     }
     if user_registry_on(imported_root)?.imported.iter().any(|skill|skill.name==definition.name)||imported_root.join(&definition.name).exists(){
@@ -222,7 +253,8 @@ pub fn import_skill(app: tauri::AppHandle, state: tauri::State<mods::StorageStat
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
     let root = PathBuf::from(directory);
     if !root.is_absolute() { return Err("请选择能力目录的绝对路径".into()); }
-    validate_import_on(&definition,&root,&super::official::root(&app)?,&user_root(&app)?)?;
+    let builtin_names = builtin_definitions(&app)?.into_iter().map(|skill| skill.name).collect::<Vec<_>>();
+    validate_import_on(&definition,&root,&super::official::root(&app)?,&user_root(&app)?,&crate::games::list(&app)?,&builtin_names)?;
     let target_root = user_root(&app)?;
     fs::create_dir_all(&target_root).map_err(|e| e.to_string())?;
     paths::reject_redirect(&target_root)?;

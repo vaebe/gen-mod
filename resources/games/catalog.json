@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "games": [
+    {
+      "id": "duckov",
+      "steamAppId": 3167020,
+      "name": "逃离鸭科夫",
+      "description": "俯视角搜打撤游戏，支持 C# MOD 开发。",
+      "cover": "images/duckov/cover.jpg",
+      "sortOrder": 0,
+      "supportStatus": "supported",
+      "icon": "images/duckov/icon.jpg"
+    },
+    {
+      "id": "stardew-valley",
+      "steamAppId": 413150,
+      "name": "星露谷物语",
+      "description": "农场生活模拟，支持 Content Patcher 内容包与 SMAPI C# MOD。",
+      "cover": "images/stardew-valley/cover.jpg",
+      "sortOrder": 1,
+      "supportStatus": "supported",
+      "icon": "images/stardew-valley/icon.jpg"
+    },
+    {
+      "id": "rimworld",
+      "steamAppId": 294100,
+      "name": "环世界",
+      "description": "殖民地模拟，可扩展物品、种族与经营系统；待适配。",
+      "cover": "images/rimworld/cover.jpg",
+      "sortOrder": 2,
+      "supportStatus": "planned",
+      "icon": "images/rimworld/icon.jpg"
+    },
+    {
+      "id": "terraria",
+      "steamAppId": 105600,
+      "name": "泰拉瑞亚",
+      "description": "像素沙盒冒险，可扩展装备、敌人与探索内容；待适配。",
+      "cover": "images/terraria/cover.jpg",
+      "sortOrder": 3,
+      "supportStatus": "planned",
+      "icon": "images/terraria/icon.jpg"
+    },
+    {
+      "id": "project-zomboid",
+      "steamAppId": 108600,
+      "name": "僵尸毁灭工程",
+      "description": "末日生存模拟，可扩展道具、界面与生存机制；待适配。",
+      "cover": "images/project-zomboid/cover.jpg",
+      "sortOrder": 4,
+      "supportStatus": "planned",
+      "icon": "images/project-zomboid/icon.jpg"
+    },
+    {
+      "id": "dont-starve-together",
+      "steamAppId": 322330,
+      "name": "饥荒联机版",
+      "description": "合作生存，可扩展角色、物品与世界规则；待适配。",
+      "cover": "images/dont-starve-together/cover.jpg",
+      "sortOrder": 5,
+      "supportStatus": "planned",
+      "icon": "images/dont-starve-together/icon.jpg"
+    },
+    {
+      "id": "factorio",
+      "steamAppId": 427520,
+      "name": "异星工厂",
+      "description": "自动化工厂建造，可扩展生产链、科技与物流；待适配。",
+      "cover": "images/factorio/cover.jpg",
+      "sortOrder": 6,
+      "supportStatus": "planned",
+      "icon": "images/factorio/icon.jpg"
+    },
+    {
+      "id": "slay-the-spire",
+      "steamAppId": 646570,
+      "name": "杀戮尖塔",
+      "description": "卡牌构筑冒险，可扩展卡牌、遗物与角色；待适配。",
+      "cover": "images/slay-the-spire/cover.jpg",
+      "sortOrder": 7,
+      "supportStatus": "planned",
+      "icon": "images/slay-the-spire/icon.jpg"
+    },
+    {
+      "id": "balatro",
+      "steamAppId": 2379780,
+      "name": "小丑牌",
+      "description": "扑克卡牌构筑，可扩展小丑牌与计分效果；待适配。",
+      "cover": "images/balatro/cover.jpg",
+      "sortOrder": 8,
+      "supportStatus": "planned",
+      "icon": "images/balatro/icon.jpg"
+    },
+    {
+      "id": "oxygen-not-included",
+      "steamAppId": 457140,
+      "name": "缺氧",
+      "description": "殖民地生存模拟，可调整建筑、界面与模拟机制；待适配。",
+      "cover": "images/oxygen-not-included/cover.jpg",
+      "sortOrder": 9,
+      "supportStatus": "planned",
+      "icon": "images/oxygen-not-included/icon.jpg"
+    },
+    {
+      "id": "noita",
+      "steamAppId": 881100,
+      "name": "Noita",
+      "description": "像素物理动作冒险，可扩展法术、物品与规则；待适配。",
+      "cover": "images/noita/cover.jpg",
+      "sortOrder": 10,
+      "supportStatus": "planned",
+      "icon": "images/noita/icon.jpg"
+    },
+    {
+      "id": "brotato",
+      "steamAppId": 1942280,
+      "name": "土豆兄弟",
+      "description": "俯视角动作生存，可扩展角色、武器与道具；待适配。",
+      "cover": "images/brotato/cover.jpg",
+      "sortOrder": 11,
+      "supportStatus": "planned",
+      "icon": "images/brotato/icon.jpg"
+    },
+    {
+      "id": "core-keeper",
+      "steamAppId": 1621690,
+      "name": "地心护核者",
+      "description": "像素沙盒生存，可扩展道具与便利功能；待适配。",
+      "cover": "images/core-keeper/cover.jpg",
+      "sortOrder": 12,
+      "supportStatus": "planned",
+      "icon": "images/core-keeper/icon.jpg"
+    },
+    {
+      "id": "rain-world",
+      "steamAppId": 312520,
+      "name": "雨世界",
+      "description": "生态生存平台冒险，可扩展区域、角色与体验；待适配。",
+      "cover": "images/rain-world/cover.jpg",
+      "sortOrder": 13,
+      "supportStatus": "planned",
+      "icon": "images/rain-world/icon.jpg"
+    },
+    {
+      "id": "barotrauma",
+      "steamAppId": 602960,
+      "name": "潜渊症",
+      "description": "潜艇合作生存，可扩展物品、生物与潜艇内容；待适配。",
+      "cover": "images/barotrauma/cover.jpg",
+      "sortOrder": 14,
+      "supportStatus": "planned",
+      "icon": "images/barotrauma/icon.jpg"
+    },
+    {
+      "id": "mindustry",
+      "steamAppId": 1127400,
+      "name": "Mindustry",
+      "description": "工厂塔防，可扩展方块、单位与科技树；待适配。",
+      "cover": "images/mindustry/cover.jpg",
+      "sortOrder": 15,
+      "supportStatus": "planned",
+      "icon": "images/mindustry/icon.jpg"
+    },
+    {
+      "id": "starbound",
+      "steamAppId": 211820,
+      "name": "星界边境",
+      "description": "像素星际沙盒，可扩展物品、种族与任务；待适配。",
+      "cover": "images/starbound/cover.jpg",
+      "sortOrder": 16,
+      "supportStatus": "planned",
+      "icon": "images/starbound/icon.jpg"
+    },
+    {
+      "id": "prison-architect",
+      "steamAppId": 233450,
+      "name": "监狱建筑师",
+      "description": "俯视角经营模拟，可扩展对象与经营内容；待适配。",
+      "cover": "images/prison-architect/cover.jpg",
+      "sortOrder": 17,
+      "supportStatus": "planned",
+      "icon": "images/prison-architect/icon.jpg"
+    },
+    {
+      "id": "battle-brothers",
+      "steamAppId": 365360,
+      "name": "战场兄弟",
+      "description": "回合制佣兵策略，可调整装备、事件与战斗规则；待适配。",
+      "cover": "images/battle-brothers/cover.jpg",
+      "sortOrder": 18,
+      "supportStatus": "planned",
+      "icon": "images/battle-brothers/icon.jpg"
+    },
+    {
+      "id": "lethal-company",
+      "steamAppId": 1966720,
+      "name": "致命公司",
+      "description": "多人合作搜集生存，可扩展道具与交互体验；待适配。",
+      "cover": "images/lethal-company/cover.jpg",
+      "sortOrder": 19,
+      "supportStatus": "planned",
+      "icon": "images/lethal-company/icon.jpg"
+    }
+  ]
+}

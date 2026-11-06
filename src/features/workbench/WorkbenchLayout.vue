@@ -42,7 +42,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <SidebarProvider class="h-full min-h-0" :style="{ '--sidebar-width': '15rem' }">
+  <SidebarProvider class="h-full min-h-0" :style="{ '--sidebar-width': '16rem' }">
     <ProjectSidebar />
     <SidebarInset class="min-h-0 overflow-hidden [@media(max-width:768px)]:pl-12 md:peer-data-[state=collapsed]:pl-12">
       <SidebarTrigger class="absolute left-3 top-3 z-10 hidden [@media(max-width:768px)]:flex group-has-[[data-slot=sidebar][data-state=collapsed]]/sidebar-wrapper:flex" aria-label="展开项目导航" title="展开项目导航" />

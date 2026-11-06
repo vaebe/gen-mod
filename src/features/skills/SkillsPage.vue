@@ -76,22 +76,25 @@ onMounted(refresh)
 </script>
 
 <template>
-  <section class="h-full min-h-0 overflow-y-auto">
-    <div class="mx-auto max-w-3xl space-y-6 px-6 py-8">
-      <div>
-        <h1 class="text-xl font-semibold">
-          Skills
-        </h1><p class="mt-2 text-sm text-muted-foreground">
+  <section class="studio-page min-h-0">
+    <div class="studio-content space-y-6">
+      <header class="border-b pb-8">
+        <p class="studio-eyebrow">
+          SKILL LIBRARY
+        </p>
+        <h1 class="studio-title">
+          创作能力
+        </h1><p class="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
           每个项目加载已启用的通用 Skill，以及绑定该游戏的 Skill。变更在下次新会话生效，旧会话保留为只读历史。
         </p>
-      </div>
+      </header>
       <FieldError v-if="error">
         {{ error }}
       </FieldError>
-      <ul class="divide-y border-y">
+      <ul class="divide-y overflow-hidden rounded-xl border bg-card px-2">
         <SkillDetails v-for="skill in skills" :key="skill.name" :skill="skill" :disabled="busy || session.anyBusy" @toggle="toggle(skill, $event)" @select="showSkill(skill)" />
       </ul>
-      <Collapsible class="rounded-lg border p-4">
+      <Collapsible class="rounded-xl border bg-card p-4">
         <CollapsibleTrigger as-child>
           <Button type="button" variant="ghost" size="sm">
             导入本地能力
@@ -114,7 +117,7 @@ onMounted(refresh)
                 </FieldLabel>
                 <Textarea id="skill-metadata" v-model="metadata" class="font-mono" :disabled="busy" rows="7" required aria-describedby="skill-import-help" />
                 <FieldDescription id="skill-import-help">
-                  目录需包含标准 SKILL.md。游戏 Skill 只能绑定已同步的官方游戏，名称不能与官方 Skill 或已有导入重复。只校验并复制，不执行脚本。
+                  目录需包含标准 SKILL.md。游戏 Skill 只能绑定本地清单中的游戏，名称不能与官方 Skill 或已有导入重复。只校验并复制，不执行脚本。
                 </FieldDescription>
               </Field><Button type="submit" class="self-start" :disabled="busy || session.anyBusy || !directory.trim()">
                 导入

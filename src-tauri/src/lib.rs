@@ -1,4 +1,6 @@
 mod cloud;
+mod games;
+mod local_resources;
 mod project_context;
 mod project_lifecycle;
 mod storage;
@@ -24,6 +26,7 @@ pub fn run() {
         .manage(install::installer::InstallState::default())
         .setup(|app| { storage::database::initialize(app.handle()).map_err(std::io::Error::other)?; Ok(()) })
         .invoke_handler({ let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            games::list_games, games::read_game_cover, games::read_game_icon,
             cloud::auth::cloud_register,cloud::auth::cloud_login,cloud::auth::cloud_logout,cloud::auth::cloud_me,cloud::auth::cloud_initialize,
             cloud::catalog::cloud_check_updates,cloud::catalog::cloud_confirm_updates,cloud::catalog::cloud_games,
             project_lifecycle::set_mod_archived,project_lifecycle::list_archived_mods,project_lifecycle::delete_mod,
@@ -60,13 +63,7 @@ pub fn run() {
             files::pick_directory, files::open_mod_directory,
             files::export_version, files::open_task_logs,
             artifacts::registry::delete_version];
-            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
-                use tauri::Manager;
-                if !invoke.message.command().starts_with("cloud_") {
-                    if let Err(error)=cloud::auth::require_local(invoke.message.webview_ref().app_handle()) {invoke.resolver.reject(error);return true;}
-                }
-                handler(invoke)
-            }
+            handler
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

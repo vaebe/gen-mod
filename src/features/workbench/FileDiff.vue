@@ -33,7 +33,7 @@ async function copy(): Promise<void> {
       二进制或大于 1 MiB 的文件不展示全文。原大小 {{ diff.change.beforeSize ?? 0 }} B，当前 {{ diff.change.afterSize ?? 0 }} B。
     </p>
     <div v-else class="overflow-x-auto pb-4">
-      <pre v-for="(line, index) in diff.lines" :key="index" class="px-3 font-mono text-[11px] leading-5" :class="line.kind === 'insert' ? 'bg-green-500/10 text-green-800' : line.kind === 'delete' ? 'bg-red-500/10 text-red-800' : 'text-muted-foreground'">{{ line.kind === 'insert' ? '+' : line.kind === 'delete' ? '−' : ' ' }}{{ line.text }}</pre>
+      <pre v-for="(line, index) in diff.lines" :key="index" class="px-3 font-mono text-[11px] leading-5" :class="line.kind === 'insert' ? 'bg-green-500/10 text-green-800 dark:text-green-300' : line.kind === 'delete' ? 'bg-red-500/10 text-red-800 dark:text-red-300' : 'text-muted-foreground'">{{ line.kind === 'insert' ? '+' : line.kind === 'delete' ? '−' : ' ' }}{{ line.text }}</pre>
     </div>
     <p v-if="error" role="alert" class="px-3 pb-3 text-xs text-destructive">
       {{ error }}

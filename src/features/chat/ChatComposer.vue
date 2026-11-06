@@ -100,10 +100,10 @@ function pasteFiles(event: ClipboardEvent): void {
 </script>
 
 <template>
-  <div class="shrink-0 px-4 pt-2 pb-3 lg:px-8">
+  <div class="shrink-0 px-4 pt-3 pb-5 lg:px-8">
     <Popover v-model:open="menuOpen">
       <PopoverAnchor as-child>
-        <div class="mx-auto max-w-3xl rounded-2xl border bg-card p-3 shadow-xs">
+        <div class="studio-composer mx-auto max-w-3xl rounded-xl border bg-card p-4">
           <input ref="picker" type="file" multiple class="hidden" @change="chooseFiles">
           <div v-if="attachments.length" class="mb-3 flex flex-wrap gap-2">
             <div v-for="file in attachments" :key="file.id" class="relative flex max-w-56 items-center text-xs" :class="file.type === 'image' ? 'shrink-0' : 'gap-2 rounded-lg border bg-muted/30 p-1.5'">
@@ -113,7 +113,7 @@ function pasteFiles(event: ClipboardEvent): void {
               </Button>
             </div>
           </div>
-          <Textarea v-model="requirement" rows="2" class="min-h-[44px] max-h-50 resize-none border-0 p-0 text-sm leading-6 shadow-none focus-visible:ring-0" aria-label="MOD 需求" placeholder="描述你希望实现的 MOD…" @blur="$emit('save')" @keydown="handleKey" @paste="pasteFiles" />
+          <Textarea v-model="requirement" rows="2" class="min-h-[56px] max-h-50 resize-none border-0 bg-transparent p-0 text-sm leading-6 shadow-none focus-visible:ring-0 dark:bg-transparent" aria-label="MOD 需求" placeholder="描述你希望实现的 MOD…" @blur="$emit('save')" @keydown="handleKey" @paste="pasteFiles" />
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <PopoverTrigger as-child>
               <Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground" aria-label="添加文件或使用会话功能" title="功能（也可输入 /）" @click="slashMenu = false" @keydown="handleKey">

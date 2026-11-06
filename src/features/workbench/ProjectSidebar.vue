@@ -6,7 +6,7 @@ import { defineAsyncComponent, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem, SidebarTrigger } from '@/components/ui/sidebar'
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem, SidebarTrigger } from '@/components/ui/sidebar'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import SessionManageDialog from './SessionManageDialog.vue'
@@ -43,21 +43,32 @@ async function createSession(modId: string): Promise<void> {
 
 <template>
   <Sidebar>
-    <SidebarContent class="gap-0">
+    <SidebarHeader class="px-4 pt-5 pb-5">
+      <div class="flex items-center gap-3">
+        <RouterLink to="/mods" aria-label="Gen MOD 项目首页" class="flex min-w-0 flex-1 items-center gap-2.5 rounded-md">
+          <img src="/gen-mod-icon.png" alt="" class="size-9 shrink-0 rounded-lg">
+          <span class="min-w-0">
+            <span class="studio-brand block text-foreground">Gen MOD</span>
+            <span class="block text-[10px] tracking-[0.12em] text-muted-foreground">游戏模组创作工具</span>
+          </span>
+        </RouterLink>
+        <SidebarTrigger class="size-7 shrink-0 text-muted-foreground" aria-label="收起项目导航" title="收起项目导航" />
+      </div>
+    </SidebarHeader>
+    <SidebarContent class="gap-2 px-2">
       <SidebarGroup class="pb-1">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton as-child class="pr-10" :is-active="route.path === '/mods'">
+            <SidebarMenuButton as-child class="h-9" :is-active="route.path === '/mods'">
               <RouterLink to="/mods">
                 <Folder />全部项目
               </RouterLink>
             </SidebarMenuButton>
-            <SidebarTrigger class="absolute right-1 top-0.5" aria-label="收起项目导航" title="收起项目导航" />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroup>
-      <SidebarGroup class="pt-1">
-        <SidebarGroupLabel class="h-6">
+      <SidebarGroup class="border-t border-sidebar-border pt-4">
+        <SidebarGroupLabel class="mb-2 h-6 text-[11px] tracking-wide">
           最近的项目
         </SidebarGroupLabel>
         <p v-if="projects.loading" class="px-2 py-3 text-xs text-muted-foreground">
@@ -123,7 +134,7 @@ async function createSession(modId: string): Promise<void> {
         </SidebarMenu>
       </SidebarGroup>
     </SidebarContent>
-    <SidebarFooter class="pb-4">
+    <SidebarFooter class="mx-4 border-t border-sidebar-border px-0 pt-3 pb-4">
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton as-child :is-active="route.path === '/skills'">
