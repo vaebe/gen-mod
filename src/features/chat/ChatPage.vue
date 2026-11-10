@@ -22,6 +22,7 @@ import MessageTimeline from './MessageTimeline.vue'
 import { useDraft } from './useDraft'
 
 const VerificationHistory = defineAsyncComponent(() => import('@/features/verification/VerificationHistory.vue'))
+const FollowupQueue = defineAsyncComponent(() => import('./FollowupQueue.vue'))
 const route = useRoute()
 const router = useRouter()
 const project = shallowRef<ModProject>()
@@ -31,6 +32,8 @@ const loadingProject = shallowRef(true)
 const attachmentError = shallowRef('')
 const readingAttachments = shallowRef(false)
 const sending = shallowRef(false)
+const editingFollowup = shallowRef(false)
+let followupEdit: Promise<void> | undefined
 let attachmentGeneration = 0
 const tasks = shallowRef<TaskRecord[]>([])
 const draft = useDraft()
@@ -38,6 +41,53 @@ const { requirement, error: saveError } = draft
 const configuration = useConfiguration()
 const { status } = configuration
 const session = useSessionStore()
+const timelineMessages = computed(() => session.chat.messages.filter(message => message.final || (!message.inputId && !session.followups.items.some(item => item.id === message.id))))
+const pendingSteering = computed(() => session.steeringInputs.filter(input => input.status !== 'confirmed' && !session.followups.items.some(item => item.id === input.inputId)))
+async function editFollowup(id: string): Promise<void> {
+  const target = session.stateFor(session.modId, session.sessionId)
+  if (!target || target.readOnly || sending.value || editingFollowup.value || readingAttachments.value) {
+    return
+  }
+  if (requirement.value || target.attachments.length) {
+    target.followups.error = '输入框已有草稿，请先处理草稿，再编辑待发送消息'
+    return
+  }
+  editingFollowup.value = true
+  try {
+    followupEdit = target.followups.remove(id, (item) => {
+      if (session.selectedKey !== `${target.modId}/${target.sessionId}` || requirement.value || target.attachments.length) {
+        throw new Error('输入框已有草稿，请先处理草稿，再编辑待发送消息')
+      }
+      requirement.value = item.text
+      target.attachments = item.attachments
+      return () => draft.flush()
+    })
+    await followupEdit
+  }
+  catch (cause) { target.followups.error = (cause as Error).message }
+  finally {
+    followupEdit = undefined
+    editingFollowup.value = false
+  }
+}
+async function operateFollowup(action: 'remove' | 'deliver' | 'resume', id = ''): Promise<void> {
+  const target = session.stateFor(session.modId, session.sessionId)
+  if (!target || target.readOnly) {
+    return
+  }
+  try {
+    if (action === 'remove') {
+      await target.followups.remove(id)
+    }
+    else if (action === 'resume') {
+      await target.resumeQueue()
+    }
+    else {
+      await target.followups.deliver(id, target.working ? 'steer' : 'prompt')
+    }
+  }
+  catch (cause) { target.followups.error = (cause as Error).message }
+}
 const verification = useVerification(() => project.value?.modId, () => session.verificationRevision)
 const pendingFeedback = computed(() => verification.data.value.drafts.filter(d => d.status === 'pending' && d.payload.sourceRefs.some(ref => ref.sessionId === session.sessionId)))
 async function repair(record: VerificationRecord): Promise<void> {
@@ -83,7 +133,7 @@ watch(() => `${session.modId}/${session.sessionId}`, () => {
 })
 /** 切换会话期间完成的文件读取不得附加到另一个会话。 */
 async function attachFiles(files: File[]): Promise<void> {
-  if (readingAttachments.value) {
+  if (readingAttachments.value || editingFollowup.value) {
     return
   }
   const generation = attachmentGeneration
@@ -221,7 +271,7 @@ watch(() => [String(route.params.modId), String(route.query.session ?? ''), Stri
 }, { immediate: true })
 
 async function send(): Promise<void> {
-  if (sending.value || readingAttachments.value || opening.value || (session.busy && !session.canSteer)) {
+  if (sending.value || editingFollowup.value || readingAttachments.value || opening.value || session.readOnly || session.followups.busy || (session.busy && !session.working)) {
     return
   }
   const submittingKey = session.selectedKey
@@ -235,17 +285,26 @@ async function send(): Promise<void> {
   const message = [submitted.trim() || (selected.length ? '请根据附件继续处理当前 MOD。' : ''), textFiles].filter(Boolean).join('\n\n')
   const images = selected.filter(file => file.type === 'image').map(file => ({ type: 'image' as const, data: file.data, mimeType: file.mimeType }))
   const previousIds = new Set(target.chat.messages.map(item => item.id))
+  const enqueue = target.working || !!target.followups.editingId || target.followups.items.some(item => item.status === 'pending')
   sending.value = true
   const submission = draft.captureSubmitted()
   target.attachments = target.attachments.filter(file => !selected.some(sent => sent.id === file.id))
   let restore = false
   error.value = ''
   try {
-    await target.send(message, images, submission.save, { text: submitted, attachments: selected })
+    if (enqueue) {
+      if (!await submission.save()) {
+        throw new Error('草稿保存失败，未加入队列')
+      }
+      await target.followups.add({ text: submitted, message, attachments: selected, images })
+    }
+    else {
+      await target.send(message, images, submission.save, { text: submitted, attachments: selected })
+    }
   }
   catch (cause) {
     const confirmed = target.chat.messages.some(item => !previousIds.has(item.id) && item.role === 'user' && (item.final || (item.inputStatus && !['submitted', 'failed', 'unknown'].includes(item.inputStatus))))
-    restore = !confirmed && !target.uncertain && !/超时|未确认/.test((cause as Error).message)
+    restore = enqueue || (!confirmed && !target.uncertain && !/超时|未确认/.test((cause as Error).message))
     if (restore) {
       target.attachments = [...selected, ...target.attachments.filter(file => !selected.some(sent => sent.id === file.id))]
     }
@@ -295,6 +354,12 @@ watch(() => [String(route.query.repair ?? ''), opening.value, loadingProject.val
   await router.replace({ path: route.path, query: { session: session.sessionId } })
 })
 async function leave(): Promise<boolean> {
+  if (followupEdit) {
+    try {
+      await followupEdit
+    }
+    catch { /* 编辑失败时由队列保留来源关联，草稿仍需保存。 */ }
+  }
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = undefined
@@ -365,7 +430,7 @@ onBeforeRouteUpdate(leave)
     <p v-if="opening" class="px-5 py-3 text-xs text-muted-foreground">
       正在同步会话状态…
     </p>
-    <MessageTimeline v-if="project && session.modId === project.modId && (session.chat.messages.length || session.working)" :key="`${session.modId}-${session.sessionId}`" :messages="session.chat.messages" :tools="session.chat.tools" :mod-id="String(route.params.modId)" :tasks="tasks.filter(item => item.context.sessionId === session.sessionId)" :working="session.working" :started-at="session.startedAt" :ended-at="session.endedAt" :activity="session.activity" :last-activity-at="session.lastActivityAt" :feedback-drafts="pendingFeedback" :verification-records="verification.data.value.records" @feedback-changed="verification.refresh" />
+    <MessageTimeline v-if="project && session.modId === project.modId && (session.chat.messages.length || session.working)" :key="`${session.modId}-${session.sessionId}`" :messages="timelineMessages" :tools="session.chat.tools" :mod-id="String(route.params.modId)" :tasks="tasks.filter(item => item.context.sessionId === session.sessionId)" :working="session.working" :started-at="session.startedAt" :ended-at="session.endedAt" :activity="session.activity" :last-activity-at="session.lastActivityAt" :feedback-drafts="pendingFeedback" :verification-records="verification.data.value.records" @feedback-changed="verification.refresh" />
     <div v-else-if="loadingProject || opening" role="status" class="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
       <Spinner aria-hidden="true" />
       <span>正在加载会话…</span>
@@ -381,11 +446,6 @@ onBeforeRouteUpdate(leave)
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
-    <div v-if="session.steeringInputs.some(input => ['unknown', 'handled', 'submitted', 'queued'].includes(input.status) && !session.chat.messages.some(message => message.inputId === input.inputId))" role="status" class="max-h-28 shrink-0 overflow-auto border-t px-5 py-2 text-xs text-muted-foreground">
-      <p v-for="input in session.steeringInputs.filter(input => ['unknown', 'handled', 'submitted', 'queued'].includes(input.status) && !session.chat.messages.some(message => message.inputId === input.inputId))" :key="input.inputId" class="truncate" :title="input.message">
-        补充要求{{ input.status === 'handled' ? '已处理，未关联到正式历史' : '尚未确认执行' }}，不会自动重发：{{ input.message }}
-      </p>
-    </div>
     <Collapsible v-if="verification.data.value.records.length" class="max-h-56 shrink-0 overflow-auto border-t px-5 py-2">
       <CollapsibleTrigger as-child>
         <Button variant="ghost" size="sm">
@@ -402,6 +462,7 @@ onBeforeRouteUpdate(leave)
     <p v-if="session.readOnly" class="border-t px-5 py-5 text-xs text-muted-foreground">
       {{ project?.archived ? '项目已归档，仅可查看；在全部项目的“已归档项目”中恢复后继续制作。' : '此会话使用旧的能力上下文，只能查看历史。创建新会话继续开发。' }}
     </p>
-    <ChatComposer v-else-if="project" v-model="requirement" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-steer="session.canSteer && !sending" :stopping="session.stopping" :busy="session.busy || sending || opening" :configured="modelConfigured && !opening" :providers="status?.providers || []" :model-state="session.modelState" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @model="session.selectModel" @thinking="session.setThinking" @compact="session.compact" />
+    <FollowupQueue v-if="project" :items="session.followups.items" :editing-id="session.followups.editingId" :pending="pendingSteering" :paused="session.followups.paused" :busy="session.followups.busy || sending || readingAttachments || opening" :working="session.working" :can-steer="session.canSteer" :can-send="!session.busy && !session.pendingInput && modelConfigured" :has-draft="!!requirement || !!attachments.length" :read-only="session.readOnly" :error="session.followups.error" @edit="editFollowup" @remove="operateFollowup('remove', $event)" @deliver="operateFollowup('deliver', $event)" @resume="operateFollowup('resume')" />
+    <ChatComposer v-if="project && !session.readOnly" v-model="requirement" :restoring="editingFollowup" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-queue="session.working && !sending && !opening && !session.followups.busy" :stopping="session.stopping" :busy="session.busy || sending || opening || session.followups.busy" :configured="modelConfigured && !opening" :providers="status?.providers || []" :model-state="session.modelState" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @model="session.selectModel" @thinking="session.setThinking" @compact="session.compact" />
   </div>
 </template>

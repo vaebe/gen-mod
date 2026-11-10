@@ -1,15 +1,18 @@
+import type { FollowupInput } from './followupQueue'
 import type { ModelSelection, SessionModelState } from '@/contracts/config'
 import type { ContextUsage, ImageInput, PromptAttachment, SteeringInput, ThinkingLevel } from '@/contracts/session'
 import type { TaskContext } from '@/contracts/task'
 import type { PendingSubmission } from '@/services/pi/pendingSubmission'
 import type { PiEnvelope, PiRecord, RuntimeSnapshot, SubmissionResult } from '@/services/pi/types'
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 
 import { modService, nativeCall } from '@/services/native'
 import { createPiClient } from '@/services/pi/client'
+import { createFollowupQueue } from '@/services/pi/followupQueue'
 import { pendingSubmission } from '@/services/pi/pendingSubmission'
 import { emptyChat, reduceRecord, restoreChat } from '@/services/pi/reducer'
 import { useProjectsStore } from '@/stores/projects'
+import { InputNotSentError } from './types'
 
 /** 页面卸载不结束任务；通信、事件归并与活动状态归此单一 store。 */
 export function createSessionRuntime() {
@@ -65,6 +68,95 @@ export function createSessionRuntime() {
   let inputEpoch = 0
   let queued: PiRecord[] = []
   let frame: number | undefined
+  const queueReady = shallowRef(false)
+  const followups = createFollowupQueue({
+    identity: () => ({ modId: modId.value, sessionId: sessionId.value }),
+    allowed: mode => mode === 'steer' ? canSteer.value : !busy.value && !readOnly.value && !pendingInput.value,
+    validate: (item) => {
+      if (!modelState.value || modelState.value.error || modelChangeError.value) {
+        throw new Error(modelChangeError.value || modelState.value?.error || '请先选择可用模型')
+      }
+      if (item.images.length && !modelState.value.definition?.input.includes('image')) {
+        throw new Error('当前模型不支持图片，请编辑消息移除图片或切换模型')
+      }
+    },
+    dispatch: async (item, mode) => {
+      if (mode === 'steer') {
+        await steer(item.message, item.images, undefined, item.id)
+      }
+      else {
+        await send(item.message, item.images, undefined, { text: item.text, attachments: item.attachments }, item.id)
+      }
+    },
+    status: followupStatus,
+    removed: (id) => {
+      flush()
+      chat.value = {
+        ...chat.value,
+        messages: chat.value.messages.filter(message => message.final || (message.id !== id && message.inputId !== id)),
+        pendingUserId: chat.value.pendingUserId === id ? undefined : chat.value.pendingUserId,
+        pendingInputs: chat.value.pendingInputs?.filter(value => value !== id),
+      }
+    },
+  })
+  async function followupStatus(item: FollowupInput): Promise<FollowupInput['status'] | 'confirmed'> {
+    if (chat.value.messages.some(message => message.final && (message.inputId === item.id || message.id === item.id))) {
+      return 'confirmed'
+    }
+    if (item.mode === 'steer') {
+      const inputs = await nativeCall<SteeringInput[]>('list_steering_inputs', { modId: modId.value, sessionId: sessionId.value })
+      const input = inputs.find(input => input.inputId === item.id)
+      if (input?.status === 'confirmed' || input?.status === 'handled') {
+        return input.status
+      }
+      if (input?.status === 'rejected') {
+        return 'failed'
+      }
+      return input && ['queued', 'submitted'].includes(input.status) ? 'accepted' : 'unknown'
+    }
+    const result = await nativeCall<SubmissionResult>('read_submission_result', { modId: modId.value, sessionId: sessionId.value, requestId: item.id })
+    if (result.status === 'accepted' && result.task && ['failed', 'cancelled', 'interrupted'].includes(result.task.status)) {
+      // 队列已保留原始输入，终态任务的重复保留提示不再阻止用户重新提交。
+      if (pendingInput.value?.requestId === item.id) {
+        await clearPending()
+      }
+      return 'interrupted'
+    }
+    return result.status === 'rejected' ? 'failed' : result.status === 'accepted' ? 'accepted' : 'unknown'
+  }
+  function queueError(cause: unknown): void {
+    followups.error.value = (cause as Error).message
+  }
+  async function finishQueueTask(id?: string): Promise<void> {
+    if (!id || task.value?.taskId !== id) {
+      return
+    }
+    // 恢复快照会取得原生槽锁，等待结束事件对应的任务终态落盘。
+    await recover()
+  }
+  watch(() => [queueReady.value, busy.value, followups.busy.value, followups.paused.value, followups.items.value, followups.editingId.value, pendingInput.value], () => {
+    if (!queueReady.value || busy.value || followups.busy.value || followups.paused.value || followups.editingId.value || readOnly.value || pendingInput.value) {
+      return
+    }
+    if (followups.items.value.some(item => ['sending', 'accepted', 'unknown', 'failed', 'interrupted'].includes(item.status))) {
+      return
+    }
+    const next = followups.items.value.find(item => item.status === 'pending')
+    if (next) {
+      queueReady.value = false
+      void followups.deliver(next.id, 'prompt', true).catch(async (cause) => {
+        await followups.pause().catch(queueError)
+        queueError(cause)
+      })
+    }
+  })
+  async function resumeQueue(): Promise<void> {
+    if (readOnly.value) {
+      return
+    }
+    await followups.resume()
+    queueReady.value = !working.value
+  }
 
   function flush(): void {
     if (frame !== undefined) {
@@ -116,6 +208,8 @@ export function createSessionRuntime() {
       changeRevision.value += 1
     }
     if (event.kind === 'exit') {
+      queueReady.value = false
+      void followups.pause().catch(queueError)
       stopping.value = false
       compacting.value = false
       endedAt.value ??= Date.now()
@@ -129,6 +223,7 @@ export function createSessionRuntime() {
       lastActivityAt.value = Date.now()
     }
     if (event.kind === 'task' && record.type === 'task_started') {
+      queueReady.value = false
       startedAt.value = Date.parse((record.context as TaskContext).createdAt)
       if (chat.value.pendingUserId) {
         chat.value = { ...chat.value, messages: chat.value.messages.map(message => message.id === chat.value.pendingUserId ? { ...message, taskId: (record.context as TaskContext).taskId, timestamp: startedAt.value } : message) }
@@ -183,6 +278,12 @@ export function createSessionRuntime() {
         lastActivityAt.value = Date.now()
       }
       if (record.type === 'agent_settled') {
+        if (record.aborted === true) {
+          void followups.pause().catch(queueError)
+        }
+        else {
+          void finishQueueTask(task.value?.taskId).catch(queueError)
+        }
         stopping.value = false
         endedAt.value ??= Date.now()
         void refreshStats()
@@ -288,6 +389,7 @@ export function createSessionRuntime() {
       const input = steeringInputs.value.find(input => input.status === 'confirmed' && ((input.entryId && message.entryId === input.entryId) || (message.inputId === input.inputId)))
       return input ? { ...message, taskId: input.taskId, inputId: input.inputId, inputStatus: input.status } : message
     }) }
+    void followups.reconcile().catch(queueError)
   }
   client.subscribe(receive)
 
@@ -327,6 +429,10 @@ export function createSessionRuntime() {
     if (!value.running) {
       // 使用后端任务终态完成展示清理；无进程不能推断为成功。
       chat.value = reduceRecord(chat.value, { type: 'agent_settled', aborted: value.task?.status !== 'finished' })
+    }
+    queueReady.value = !value.running && value.task?.status === 'finished'
+    if (!value.running && value.task && value.task.status !== 'finished') {
+      void followups.pause().catch(queueError)
     }
     task.value = value.task?.context
     stopping.value = value.stopping
@@ -422,6 +528,7 @@ export function createSessionRuntime() {
       applyModel(metadata.modelState)
       client.select(projectId, targetId, metadata.generation)
       pendingInput.value = await pendingSubmission.read(projectId, targetId)
+      await followups.load()
       uncertain.value = !!pendingInput.value
       if (!historyOnly) {
         await recover(true)
@@ -570,7 +677,7 @@ export function createSessionRuntime() {
   }
 
   async function close(): Promise<void> {
-    if (busy.value) {
+    if (busy.value || followups.busy.value) {
       throw new Error('请等待会话空闲后操作')
     }
     await client.disconnect()
@@ -581,34 +688,35 @@ export function createSessionRuntime() {
   }
 
   /** 先显示本地提交，再保存草稿和启动任务；pi 用户事件沿用占位 ID。 */
-  async function send(requirement: string, images: ImageInput[] = [], saveDraft?: () => Promise<boolean>, original?: { text: string, attachments: PromptAttachment[] }): Promise<void> {
+  async function send(requirement: string, images: ImageInput[] = [], saveDraft?: () => Promise<boolean>, original?: { text: string, attachments: PromptAttachment[] }, requestId?: string): Promise<void> {
     if (readOnly.value) {
-      throw new Error('此会话只能查看历史，请新建会话')
+      throw new InputNotSentError('此会话只能查看历史，请新建会话')
     }
     if (!modelState.value || modelState.value.error || modelChangeError.value) {
-      throw new Error(modelChangeError.value || modelState.value?.error || '请先选择模型')
+      throw new InputNotSentError(modelChangeError.value || modelState.value?.error || '请先选择模型')
     }
     if (images.length && !modelState.value.definition?.input.includes('image')) {
-      throw new Error('当前模型不支持图片，请移除图片附件或切换模型')
+      throw new InputNotSentError('当前模型不支持图片，请移除图片附件或切换模型')
     }
     if (pendingInput.value) {
-      throw new Error('请先核对并处理保留的提交内容')
+      throw new InputNotSentError('请先核对并处理保留的提交内容')
     }
     if (!runtimeConfirmed.value) {
-      throw new Error('会话状态尚未确认，请重新连接后再提交')
+      throw new InputNotSentError('会话状态尚未确认，请重新连接后再提交')
     }
     if (working.value) {
       await steer(requirement, images, saveDraft)
       return
     }
     if (busy.value) {
-      throw new Error('会话暂不能提交，请保留输入')
+      throw new InputNotSentError('会话暂不能提交，请保留输入')
     }
     submitting.value = true
+    queueReady.value = false
     stopping.value = false
     error.value = ''
     flush()
-    const localId = crypto.randomUUID()
+    const localId = requestId ?? crypto.randomUUID()
     const submission: PendingSubmission = { requestId: localId, modId: modId.value, sessionId: sessionId.value, text: original?.text ?? requirement, message: requirement, attachments: original?.attachments ?? [], images, timestamp: Date.now() }
     startedAt.value = Date.now()
     endedAt.value = undefined
@@ -617,9 +725,14 @@ export function createSessionRuntime() {
     chat.value = { ...chat.value, pendingUserId: localId, messages: [...chat.value.messages, { id: localId, role: 'user', parts: [{ type: 'text', text: requirement }, ...images], final: false, timestamp: startedAt.value }] }
     try {
       if (saveDraft && !await saveDraft()) {
-        throw new Error('需求保存失败，请重试')
+        throw new InputNotSentError('需求保存失败，请重试')
       }
-      await pendingSubmission.save(JSON.parse(JSON.stringify(submission)))
+      try {
+        await pendingSubmission.save(JSON.parse(JSON.stringify(submission)))
+      }
+      catch (cause) {
+        throw new InputNotSentError((cause as Error).message)
+      }
       pendingInput.value = submission
       task.value = await client.prompt(modId.value, sessionId.value, requirement, thinkingLevel.value, images, localId)
       pendingStatus.value = 'accepted'
@@ -665,17 +778,17 @@ export function createSessionRuntime() {
     finally { submitting.value = false }
   }
   /** 多条补充各有占位，正式关联由原生队列与内容确认。 */
-  async function steer(message: string, images: ImageInput[], saveDraft?: () => Promise<boolean>): Promise<void> {
+  async function steer(message: string, images: ImageInput[], saveDraft?: () => Promise<boolean>, requestId?: string): Promise<void> {
     if (!canSteer.value || !task.value) {
-      throw new Error('任务暂不能接收引导，请保留输入')
+      throw new InputNotSentError('任务暂不能接收引导，请保留输入')
     }
     steeringSubmitting.value = true
-    const inputId = crypto.randomUUID()
+    const inputId = requestId ?? crypto.randomUUID()
     flush()
     chat.value = { ...chat.value, pendingInputs: [...(chat.value.pendingInputs ?? []), inputId], messages: [...chat.value.messages, { id: inputId, inputId, taskId: task.value.taskId, role: 'user', parts: [{ type: 'text', text: message }, ...images], final: false, timestamp: Date.now(), inputStatus: 'submitted' }] }
     try {
       if (saveDraft && !await saveDraft()) {
-        throw new Error('需求保存失败，请重试')
+        throw new InputNotSentError('需求保存失败，请重试')
       }
       const result = await client.steer(task.value.taskId, inputId, message, images)
       chat.value = { ...chat.value, messages: chat.value.messages.map(value => value.id === inputId ? { ...value, inputStatus: String(result.data?.disposition ?? 'unknown') } : value) }
@@ -691,6 +804,8 @@ export function createSessionRuntime() {
     finally { steeringSubmitting.value = false }
   }
   async function abort(): Promise<void> {
+    queueReady.value = false
+    void followups.pause().catch(queueError)
     stopping.value = true
     if (abortTimer) {
       clearTimeout(abortTimer)
@@ -716,5 +831,5 @@ export function createSessionRuntime() {
     flush()
     await open(project, id)
   }
-  return { initialized, connectionError, pendingInput, pendingStatus, uncertain, recover, clearPending, attachments, steeringInputs, stopping, canSteer, steeringSubmitting, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, changingModel, modelState, modelChangeError, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, open, send, abort, restart, flush, refreshStats, refreshModel, selectModel, setThinking, compact, close }
+  return { followups, resumeQueue, initialized, connectionError, pendingInput, pendingStatus, uncertain, recover, clearPending, attachments, steeringInputs, stopping, canSteer, steeringSubmitting, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, changingModel, modelState, modelChangeError, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, open, send, abort, restart, flush, refreshStats, refreshModel, selectModel, setThinking, compact, close }
 }

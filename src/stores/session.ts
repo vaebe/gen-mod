@@ -168,6 +168,7 @@ export const useSessionStore = defineStore('session', () => {
     selected.value.attachments = value
   } })
   const canSteer = computed(() => selected.value.canSteer)
+  const followups = computed(() => selected.value.followups)
   const stopping = computed(() => selected.value.stopping)
   const steeringInputs = computed(() => selected.value.steeringInputs)
   const anyBusy = computed(() => [...runtimes.values()].some(value => value.busy))
@@ -178,5 +179,5 @@ export const useSessionStore = defineStore('session', () => {
   const uncertain = computed(() => selected.value.uncertain)
   const recover = (force = false) => selected.value.recover(force)
   const clearPending = () => selected.value.clearPending()
-  return { connectionError, pendingInput, pendingStatus, synchronizing, uncertain, recover, clearPending, forgetProject, attachments, canSteer, stopping, steeringInputs, runtimes, selectedKey, stateFor, isBusy, isRunning, anyBusy, open, close, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, modelState, modelChangeError, selectModel, refreshModel, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, send, abort, restart, flush, refreshStats, setThinking, compact }
+  return { followups, connectionError, pendingInput, pendingStatus, synchronizing, uncertain, recover, clearPending, forgetProject, attachments, canSteer, stopping, steeringInputs, runtimes, selectedKey, stateFor, isBusy, isRunning, anyBusy, open, close, client, chat, modId, sessionId, task, error, diagnostics, uiRequest, changeRevision, artifactRevision, verificationRevision, memoryRevision, readOnly, restartAvailable, loadedSkills, working, busy, switching, compacting, changingThinking, modelState, modelChangeError, selectModel, refreshModel, thinkingLevel, thinkingLevels, contextUsage, autoCompaction, activity, lastActivityAt, startedAt, endedAt, send, abort, restart, flush, refreshStats, setThinking, compact }
 })

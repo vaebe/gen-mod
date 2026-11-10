@@ -5,6 +5,7 @@ import type { TaskContext } from '@/contracts/task'
 import { Channel } from '@tauri-apps/api/core'
 import { shallowRef } from 'vue'
 import { nativeCall } from '@/services/native'
+import { InputNotSentError } from './types'
 
 interface Pending { resolve: (record: PiRecord) => void, reject: (error: Error) => void, timer: ReturnType<typeof setTimeout> }
 
@@ -191,7 +192,7 @@ export function createPiClient() {
   }
 
   /** 原生创建并绑定任务后才提交 prompt，普通 RPC 不能绕开此入口。 */
-  async function prompt(modId: string, sessionId: string, requirement: string, thinkingLevel: ThinkingLevel, images: ImageInput[] = [], requestId = crypto.randomUUID()): Promise<TaskContext> {
+  async function prompt(modId: string, sessionId: string, requirement: string, thinkingLevel: ThinkingLevel, images: ImageInput[] = [], requestId: string = crypto.randomUUID()): Promise<TaskContext> {
     rejectAll('正在开始新任务')
     minimumGeneration = generation.value + 1
     submissionState.value = 'submitting'
@@ -262,13 +263,15 @@ export function createPiClient() {
       return await response
     }
     catch (cause) {
+      const message = (cause as Error).message
+      const error = message.startsWith('STEERING_NOT_SENT:') ? new InputNotSentError(message.slice('STEERING_NOT_SENT:'.length)) : cause
       const item = pending.get(inputId)
       if (item) {
         clearTimeout(item.timer)
         pending.delete(inputId)
-        item.reject(cause as Error)
+        item.reject(error as Error)
       }
-      throw cause
+      throw error
     }
   }
   async function disconnect(): Promise<void> {

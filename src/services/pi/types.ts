@@ -1,5 +1,8 @@
 import type { TaskRecord } from '@/contracts/task'
 
+/** 已确认尚未跨过原生投递边界，可以安全恢复输入。 */
+export class InputNotSentError extends Error {}
+
 /** 锁定 pi 的 RPC JSONL。内部桥事件与 pi 记录分开。 */
 export interface PiRecord {
   type: string

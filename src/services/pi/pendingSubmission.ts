@@ -1,3 +1,4 @@
+import type { FollowupState } from './followupQueue'
 import type { ImageInput, PromptAttachment } from '@/contracts/session'
 
 export interface PendingSubmission {
@@ -56,4 +57,10 @@ export const pendingSubmission = {
     }
     finally { db.close() }
   },
+}
+
+// 与单次提交使用不同的键；图片仍保存在 IndexedDB，不受 localStorage 配额限制。
+export const followupStorage = {
+  read: (modId: string, sessionId: string) => access<FollowupState | undefined>(modId, `${sessionId}/followups`, 'readonly', (store, key) => store.get(key)),
+  save: (modId: string, sessionId: string, value: FollowupState) => access(modId, `${sessionId}/followups`, 'readwrite', (store, key) => store.put(JSON.parse(JSON.stringify(value)), key)),
 }

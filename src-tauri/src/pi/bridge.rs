@@ -955,29 +955,38 @@ fn validate_images(images: &[Value]) -> Result<(),String> {
 /// 只允许向身份及任务完全匹配的活动 Agent 发送引导，不创建任务或进程。
 #[tauri::command]
 pub fn steer_mod_task(app: tauri::AppHandle, state: tauri::State<PiState>, mod_id: String, session_id: String, generation: u64, task_id: String, input_id: String, message: String, images: Option<Vec<Value>>) -> Result<(),String> {
-    crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
-    paths::validate_id(&input_id)?;
-    let images = images.unwrap_or_default(); validate_images(&images)?;
-    if message.trim().is_empty() { return Err("引导不能为空".into()); }
-    let slot = state.0.slot(&mod_id,&session_id)?;
-    let mut inner = slot.lock().map_err(|_| "会话运行锁异常")?;
-    if inner.generation != generation { return Err("会话代次已变化".into()); }
-    let process = inner.process.as_mut().ok_or("任务已结束，请保留输入并发送新需求")?;
-    let task = process.task.as_ref().ok_or("没有活动任务")?;
-    if task.context.task_id != task_id || task.status != "running" || !process.active || process.compacting || process.stopping { return Err("任务无法接收引导，请保留输入后重试或发送新需求".into()); }
-    let repository = crate::storage::repository::list_steering_inputs(app.clone(),mod_id.clone(),session_id.clone())?;
-    if repository.iter().any(|v|v["inputId"]==input_id) { return Err("引导 ID 已提交，不自动重发".into()); }
-    if !images.is_empty() && !process.model.input.iter().any(|input| input == "image") { return Err("当前模型不支持图片，请移除图片附件或切换模型".into()); }
-    let fingerprint = input_fingerprint(&json!({"content":[{"type":"text","text":message}]}),Some(&images))?;
-    let mut input = json!({"inputId":input_id,"modId":mod_id,"sessionId":session_id,"taskId":task_id,"generation":generation,"submittedAt":mods::now()?,"message":message,"fingerprint":fingerprint,"status":"submitted"});
-    crate::storage::repository::steering(&app,&input)?;
-    let sent = writeln!(process.stdin,"{}",json!({"type":"steer","id":input_id,"message":message,"images":images})).and_then(|_|process.stdin.flush());
-    if let Err(error) = sent {
-        input["status"]="unknown".into(); crate::storage::repository::steering(&app,&input)?;
-        return Err(format!("引导投递未确认，不自动重发：{error}"));
-    }
-    process.steering.push(input);
-    Ok(())
+    let mut may_have_sent = false;
+    let result = (|| -> Result<(), String> {
+        crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
+        paths::validate_id(&input_id)?;
+        let images = images.unwrap_or_default(); validate_images(&images)?;
+        if message.trim().is_empty() { return Err("引导不能为空".into()); }
+        let slot = state.0.slot(&mod_id,&session_id)?;
+        let mut inner = slot.lock().map_err(|_| "会话运行锁异常")?;
+        let repository = crate::storage::repository::list_steering_inputs(app.clone(),mod_id.clone(),session_id.clone())?;
+        if repository.iter().any(|v|v["inputId"]==input_id) {
+            may_have_sent = true;
+            return Err("引导 ID 已提交，不自动重发".into());
+        }
+        if inner.generation != generation { return Err("会话代次已变化".into()); }
+        let process = inner.process.as_mut().ok_or("任务已结束，请保留输入并发送新需求")?;
+        let task = process.task.as_ref().ok_or("没有活动任务")?;
+        if task.context.task_id != task_id || task.status != "running" || !process.active || process.compacting || process.stopping { return Err("任务无法接收引导，请保留输入后重试或发送新需求".into()); }
+        if !images.is_empty() && !process.model.input.iter().any(|input| input == "image") { return Err("当前模型不支持图片，请移除图片附件或切换模型".into()); }
+        let fingerprint = input_fingerprint(&json!({"content":[{"type":"text","text":message}]}),Some(&images))?;
+        let mut input = json!({"inputId":input_id,"modId":mod_id,"sessionId":session_id,"taskId":task_id,"generation":generation,"submittedAt":mods::now()?,"message":message,"fingerprint":fingerprint,"status":"submitted"});
+        crate::storage::repository::steering(&app,&input)?;
+        // 从尝试写入开始，失败也不能证明消息未到达 pi。
+        may_have_sent = true;
+        let sent = writeln!(process.stdin,"{}",json!({"type":"steer","id":input_id,"message":message,"images":images})).and_then(|_|process.stdin.flush());
+        if let Err(error) = sent {
+            input["status"]="unknown".into(); crate::storage::repository::steering(&app,&input)?;
+            return Err(format!("引导投递未确认，不自动重发：{error}"));
+        }
+        process.steering.push(input);
+        Ok(())
+    })();
+    result.map_err(|error| if may_have_sent { error } else { format!("STEERING_NOT_SENT:{error}") })
 }
 pub(crate) fn input_fingerprint(message: &Value, images: Option<&Vec<Value>>) -> Result<String,String> {
     use sha2::{Digest,Sha256};
