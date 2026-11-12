@@ -13,7 +13,7 @@ pub struct MemoryBootstrap {
 #[serde(rename_all="camelCase")]
 pub struct History {pub task_id:String,pub status:String,#[serde(skip_serializing_if="Option::is_none")]pub version_id:Option<String>}
 pub fn packet(task:&TaskContext,snapshot:&ContextSnapshot,history:Vec<History>,game:&str)->Result<MemoryBootstrap,String>{
-    if snapshot.mod_id!=task.mod_id || snapshot.task_id!=task.task_id || task.context_snapshot_id.as_deref()!=Some(&snapshot.snapshot_id) {return Err("项目记忆快照身份不一致".into());}
+    if snapshot.mod_id!=task.mod_id || snapshot.task_id!=task.task_id || task.context_snapshot_id!=snapshot.snapshot_id {return Err("项目记忆快照身份不一致".into());}
     // 优先保留版本和玩家约束；参考程序集只带状态，不让文件清单挤占摘要。
     let context=&snapshot.context;
     let requirements=if context.confirmed_requirements.is_empty(){"尚未记录".into()}else{context.confirmed_requirements.join("\n")};
@@ -43,11 +43,10 @@ pub fn write_bootstrap(app:&tauri::AppHandle,task:&TaskContext,snapshot:&Context
 mod tests {
     use super::*;
     #[test]
-    fn summary_is_bounded_and_legacy_context_remains_readable(){
-        let raw=serde_json::json!({"taskId":"t","modId":"p","sessionId":"s","generation":1,"sourceDirectory":"source","stagingId":"stage","stagingDirectory":"stage","createdAt":"now"});
+    fn summary_is_bounded_and_preparing_context_allows_missing_bootstrap(){
+        let raw=serde_json::json!({"taskId":"t","modId":"p","sessionId":"s","generation":1,"sourceDirectory":"source","stagingId":"stage","stagingDirectory":"stage","createdAt":"now","contextSnapshotId":"snap"});
         let mut task:TaskContext=crate::storage::repository::decode(raw.to_string()).unwrap();
         assert!(task.memory_bootstrap_path.is_none());assert!(task.memory_bootstrap_sha256.is_none());
-        task.context_snapshot_id=Some("snap".into());
         let mut context=super::super::models::ProjectContext::empty("p");context.confirmed_requirements=vec!["字".repeat(7000)];
         let snapshot=ContextSnapshot{snapshot_id:"snap".into(),mod_id:"p".into(),task_id:"t".into(),created_at:"now".into(),context};
         let result=packet(&task,&snapshot,vec![],"duckov").unwrap();assert_eq!(result.summary.chars().count(),6000);assert!(result.truncated);assert!(result.history.is_empty());

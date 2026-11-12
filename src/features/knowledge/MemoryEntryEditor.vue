@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { KnowledgeNote, MemoryEntryInput } from '@/contracts/knowledge'
+import type { KnowledgeNote, MemoryEntryInput } from '@/features/knowledge/types'
 import { reactive, shallowRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -112,7 +112,7 @@ function save(): void {
       </CollapsibleContent>
     </Collapsible>
     <p v-if="note" class="text-xs text-muted-foreground">
-      {{ note.originProjectName ? `来源项目：${note.originProjectName} · ` : '' }}{{ note.updatedAt ?? note.createdAt ?? '历史记录' }} · {{ note.userEdited ? '用户维护' : 'AI 自动保存' }} · {{ note.sourceRefs.length }} 条来源记录
+      {{ note.originProjectName ? `来源项目：${note.originProjectName} · ` : '' }}{{ note.updatedAt }} · {{ note.userEdited ? '用户维护' : 'AI 自动保存' }} · {{ note.sourceRefs.length }} 条来源记录
     </p>
     <div v-if="error" role="alert" class="flex flex-col items-start gap-2 text-sm text-destructive">
       <p>

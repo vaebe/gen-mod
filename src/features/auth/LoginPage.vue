@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CloudUser } from './state'
+import type { CloudUser } from './types'
 import { ArrowRight, LoaderCircle } from '@lucide/vue'
 import { defineAsyncComponent, reactive, shallowRef } from 'vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { nativeCall } from '@/services/native'
+import { authService } from './service'
 
 const emit = defineEmits<{ authenticated: [user: CloudUser] }>()
 
@@ -35,7 +35,7 @@ async function submit() {
   }
   busy.value = true
   try {
-    const user = await nativeCall<CloudUser>(registering.value ? 'cloud_register' : 'cloud_login', {
+    const user = await (registering.value ? authService.register : authService.login)({
       email: form.email.trim(),
       password: form.password,
     })

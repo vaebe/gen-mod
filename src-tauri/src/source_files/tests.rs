@@ -147,17 +147,3 @@ fn directory_move_rejects_existing_destination_and_reserved_descendants() {
     assert!(super::directory_fingerprint(root.path(), "old", Some("new"), &["old/cache".into()]).is_err());
     assert!(super::directory_fingerprint(root.path(), "old", Some("new"), &["new/cache".into()]).is_err());
 }
-#[test]
-fn legacy_recovery_keeps_original_type_bytes_and_protects_changed_target(){
-    let root=tempfile::tempdir().unwrap();
-    let original=root.path().join("original.jpg");let target=root.path().join("restored.jpg");let staging=root.path().join("staging.tmp");
-    let bytes=b"jpeg original bytes, deliberately not decoded";
-    std::fs::write(&original,bytes).unwrap();
-    let hash=super::io::copy_to_staging(&original,&staging).unwrap();
-    assert_eq!(super::legacy_target_status(&target,&hash).unwrap(),"missing");
-    super::io::move_no_replace(&staging,&target).unwrap();
-    assert_eq!(super::legacy_target_status(&target,&hash).unwrap(),"alreadyPresent");
-    assert_eq!(std::fs::read(&original).unwrap(),bytes);assert_eq!(std::fs::read(&target).unwrap(),bytes);
-    std::fs::write(&target,b"player edits").unwrap();assert_eq!(super::legacy_target_status(&target,&hash).unwrap(),"conflict");
-    assert_eq!(std::fs::read(&target).unwrap(),b"player edits");
-}

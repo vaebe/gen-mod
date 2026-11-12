@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import type { DeepReadonly } from 'vue'
+import type { ModProject } from '@/contracts/mod'
 import type { ChatMessage, ToolRun } from '@/contracts/session'
 import type { TaskRecord } from '@/contracts/task'
-import type { FeedbackDraft, VerificationRecord } from '@/contracts/verification'
+import type { FeedbackDraft, VerificationRecord } from '@/features/verification/types'
 import { Check, Copy } from '@lucide/vue'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
@@ -10,8 +12,13 @@ import { conversationRounds } from './conversationRounds'
 import MessageParts from './MessageParts.vue'
 import RoundActivity from './RoundActivity.vue'
 
-const props = defineProps<{ messages: ChatMessage[], tools: Record<string, ToolRun>, modId: string, tasks: TaskRecord[], working: boolean, startedAt?: number, endedAt?: number, activity: string, lastActivityAt: number, feedbackDrafts?: FeedbackDraft[], verificationRecords?: VerificationRecord[] }>()
-defineEmits<{ feedbackChanged: [] }>()
+const props = defineProps<{ project: ModProject, focusTaskId?: string, messages: readonly DeepReadonly<ChatMessage>[], tools: Record<string, DeepReadonly<ToolRun>>, modId: string, tasks: TaskRecord[], working: boolean, startedAt?: number, endedAt?: number, activity: string, lastActivityAt: number, feedbackDrafts?: FeedbackDraft[], verificationRecords?: VerificationRecord[] }>()
+defineEmits<{ feedbackChanged: [], targetSelected: [target: { modId: string, directory: string }] }>()
+const DeliveryCard = defineAsyncComponent(() => import('./DeliveryCard.vue'))
+function deliveredVersion(taskId?: string): string | undefined {
+  return props.tasks.find(task => task.context.taskId === taskId)?.registeredVersionId
+    ?? props.project.versions.find(version => version.taskId === taskId)?.versionId
+}
 const VerificationCard = defineAsyncComponent(() => import('@/features/verification/VerificationCard.vue'))
 const roundEntryIds = computed(() => new Set(props.messages.flatMap(message => message.entryId ? [message.entryId] : [])))
 const unanchoredDrafts = computed(() => props.feedbackDrafts?.filter(draft => !draft.payload.sourceRefs.some(ref => roundEntryIds.value.has(ref.entryId))) ?? [])
@@ -27,7 +34,7 @@ const copiedId = shallowRef('')
 const copyError = shallowRef<{ id: string, message: string }>()
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 let resizeObserver: ResizeObserver | undefined
-async function copyReply(message: ChatMessage): Promise<void> {
+async function copyReply(message: DeepReadonly<ChatMessage>): Promise<void> {
   if (copyingId.value) {
     return
   }
@@ -65,13 +72,39 @@ onMounted(async () => {
   if (!content.value) {
     return
   }
-  scrollToBottom()
+  if (!focusTask()) {
+    scrollToBottom()
+  }
   resizeObserver = new ResizeObserver(scrollToBottom)
   resizeObserver.observe(content.value)
 })
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   clearTimeout(copyTimer)
+})
+let focusedTaskId = ''
+watch(() => props.focusTaskId, () => {
+  focusedTaskId = ''
+})
+function focusTask(): boolean {
+  if (!props.focusTaskId || !content.value) {
+    return false
+  }
+  if (focusedTaskId === props.focusTaskId) {
+    return true
+  }
+  const target = Array.from(content.value.querySelectorAll<HTMLElement>('[data-task-id]')).find(element => element.dataset.taskId === props.focusTaskId)
+  if (!target) {
+    return false
+  }
+  following.value = false
+  focusedTaskId = props.focusTaskId
+  target.scrollIntoView({ block: 'start' })
+  return true
+}
+watch(() => [props.focusTaskId, rounds.value.map(round => round.taskId).join(',')], async () => {
+  await nextTick()
+  focusTask()
 })
 function onScroll(): void {
   const element = scroll.value
@@ -100,7 +133,7 @@ watch(() => [props.messages, props.working], async () => {
 <template>
   <div ref="scroll" class="min-h-0 flex-1 overflow-auto px-5 py-5 lg:px-8" @scroll="onScroll">
     <div ref="content" class="mx-auto max-w-3xl space-y-5">
-      <section v-for="round in rounds" :key="round.id" class="space-y-4">
+      <section v-for="round in rounds" :key="round.id" :data-task-id="round.taskId" class="space-y-4">
         <article v-if="round.user" class="ml-auto max-w-[85%] space-y-2">
           <div v-if="round.user.parts.some(part => part.type === 'image')" class="flex flex-wrap justify-end gap-2">
             <ChatImage v-for="(image, index) in round.user.parts.filter(part => part.type === 'image')" :key="`${round.user.id}-image-${index}`" :image="image" :alt="`会话图片附件 ${index + 1}`" />
@@ -145,6 +178,7 @@ watch(() => [props.messages, props.working], async () => {
             {{ copyError.message }}
           </p>
         </article>
+        <DeliveryCard v-if="deliveredVersion(round.taskId)" :project="project" :version-id="deliveredVersion(round.taskId)!" @target-selected="$emit('targetSelected', $event)" />
       </section>
       <VerificationCard v-for="draft in unanchoredDrafts" :key="draft.draftId" :draft="draft" :records="verificationRecords?.filter(record => record.versionId === draft.payload.versionId)" @changed="$emit('feedbackChanged')" />
     </div>

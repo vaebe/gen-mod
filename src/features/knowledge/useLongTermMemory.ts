@@ -1,6 +1,6 @@
-import type { KnowledgeNote, MemoryEntryInput, MemoryPage } from '@/contracts/knowledge'
+import type { KnowledgeNote, MemoryEntryInput } from '@/features/knowledge/types'
 import { onScopeDispose, shallowRef } from 'vue'
-import { nativeCall } from '@/services/native'
+import { knowledgeService } from './knowledgeService'
 
 export function useLongTermMemory() {
   const notes = shallowRef<KnowledgeNote[]>([])
@@ -27,7 +27,7 @@ export function useLongTermMemory() {
     loading.value = true
     error.value = ''
     try {
-      const result = await nativeCall<MemoryPage>('list_long_term_memories', { query: { text: text.value, gameId: game.value === 'all' ? null : game.value }, status: status.value === 'all' ? null : status.value, page: nextPage, pageSize: 20 })
+      const result = await knowledgeService.list({ query: { text: text.value, gameId: game.value === 'all' ? null : game.value }, status: status.value === 'all' ? null : status.value, page: nextPage, pageSize: 20 })
       if (disposed || generation !== listGeneration) {
         return
       }
@@ -55,7 +55,7 @@ export function useLongTermMemory() {
     editing.value = false
     entryError.value = ''
     try {
-      const note = await nativeCall<KnowledgeNote>('get_long_term_memory', { noteId: id })
+      const note = await knowledgeService.get(id)
       if (!disposed && generation === entryGeneration) {
         selected.value = note
         editing.value = true
@@ -83,7 +83,7 @@ export function useLongTermMemory() {
     saving.value = true
     entryError.value = ''
     try {
-      const note = await nativeCall<KnowledgeNote>('save_long_term_memory_entry', { noteId: selected.value?.noteId ?? null, expectedRevision: selected.value?.revision ?? null, input })
+      const note = await knowledgeService.save(selected.value?.noteId ?? null, selected.value?.revision ?? null, input)
       if (!disposed) {
         selected.value = note
         await refresh()
@@ -106,7 +106,7 @@ export function useLongTermMemory() {
     saving.value = true
     entryError.value = ''
     try {
-      await nativeCall('set_long_term_memory_status', { noteId: note.noteId, expectedRevision: note.revision, status: value })
+      await knowledgeService.setStatus(note.noteId, note.revision, value)
       if (disposed) {
         return
       }
@@ -115,7 +115,7 @@ export function useLongTermMemory() {
         editing.value = false
       }
       else {
-        selected.value = await nativeCall<KnowledgeNote>('get_long_term_memory', { noteId: note.noteId })
+        selected.value = await knowledgeService.get(note.noteId)
       }
       await refresh()
     }

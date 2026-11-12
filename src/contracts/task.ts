@@ -6,20 +6,23 @@ export interface TaskContext {
   sourceDirectory: string
   stagingId: string
   stagingDirectory: string
-  contextSnapshotId?: string
+  contextSnapshotId: string
   memoryBootstrapPath?: string
   memoryBootstrapSha256?: string
   createdAt: string
 }
 export interface CommandReceipt {
+  sourceRevision: number
+  startedAt: string
+  durationMs: number
   taskId: string
   commandId: string
   toolCallId: string
   exitCode: number | null
   status: 'succeeded' | 'failed' | 'cancelled'
   logPath: string
-  program?: string
-  args?: string[]
+  program: string
+  args: string[]
 }
 export interface TaskRecord {
   finishedAt?: string | null

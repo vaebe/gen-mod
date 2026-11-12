@@ -2,11 +2,13 @@ import type { Lease } from "./workspace.js";
 import { mkdir, copyFile, writeFile, readFile, lstat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
-import { context, contained, safeRelative, runCommand } from "./commands.js";
+import { contained, safeRelative, runCommand } from "./commands.js";
+import { context } from "./task-context.js";
 
-export interface DeliveryInput { files: { source: string; target: string }[]; commandIds: string[]; targetDirectoryHint: string; verificationCases?: { id: string; precondition: string; action: string; expected: string; evidenceHint: string }[] }
+export interface DeliveryInput { summary: string; files: { source: string; target: string }[]; commandIds: string[]; targetDirectoryHint: string; verificationCases?: { id: string; precondition: string; action: string; expected: string; evidenceHint: string }[] }
 /** 从当前任务上下文取得 staging；模型不能自行指定其他任务或既有版本目录。 */
 export async function prepareDelivery(toolCallId: string, input: DeliveryInput, signal?: AbortSignal, lease?: Lease) {
+  if (typeof input.summary !== "string" || !input.summary.trim()) { throw new Error("请补充本次实际交付变化的简短摘要后重试"); }
   const task = context();
   if (!input.files.length || !input.commandIds.length) { throw new Error("交付需要文件和本任务成功命令记录"); }
   const targetNames = new Set<string>();

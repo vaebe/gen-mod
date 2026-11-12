@@ -2,10 +2,12 @@ import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkRuntimeDeclarations, checkPreparedRuntime } from "./runtime-contract.mjs";
 import { collectBuildArtifacts } from "./collect-build-artifacts.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
+checkPreparedRuntime(join(root, "runtime/resources"), checkRuntimeDeclarations(root));
 // package.json 是唯一版本来源，构建前同步程序与安装包版本。
 const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 if (typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {

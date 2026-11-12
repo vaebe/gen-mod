@@ -10,3 +10,7 @@ pub mod workspace;
 
 mod subscription;
 pub mod submissions;
+
+mod process;
+
+pub mod session_repository;

@@ -160,7 +160,7 @@ impl Workspaces {
         let state = workspace.state.lock().map_err(|_| "工作区锁异常")?;
         let revision = state.completed_commands.get(&(context.task_id.clone(),receipt.tool_call_id.clone())).copied()
             .or_else(||state.leases.values().find(|v|v.task==context.task_id && v.tool==receipt.tool_call_id && v.operation=="prepare_delivery").map(|v|v.revision));
-        if revision.is_none() || revision!=receipt.source_revision { return Err("命令回执缺少原生租约 revision".into()); } Ok(())
+        if revision!=Some(receipt.source_revision) { return Err("命令回执缺少原生租约 revision".into()); } Ok(())
     }
     pub fn validate_delivery(&self, app: &tauri::AppHandle, context: &super::tasks::TaskContext, lease_id: &str, revision: u64) -> Result<(),String> {
         let workspace = self.workspace(&context.mod_id)?;

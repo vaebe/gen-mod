@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ProviderConfiguration, SaveConfiguration } from '@/contracts/config'
+import type { ProviderConfiguration, SaveConfiguration } from '@/features/settings/types'
 import { computed, defineAsyncComponent, onMounted, reactive, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/u
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { providerApis } from '@/contracts/config'
+import { providerApis } from '@/features/settings/types'
 import { useConfiguration } from './useConfiguration'
 
 const ProviderEditor = defineAsyncComponent(() => import('./ProviderEditor.vue'))

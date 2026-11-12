@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import type { SkillUpdates } from '@/contracts/skill'
 import { onMounted, shallowRef } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { nativeCall } from '@/services/native'
-import { cloudUser, authInvalidEvent } from '@/features/auth/state'
+import { authService } from '@/features/auth/service'
+import { cloudUser } from '@/features/auth/state'
+import { skillsService } from '@/features/skills/service'
 import { useProjectsStore } from '@/stores/projects'
-interface Updates { newGames: { id: string, name: string }[], versions: { skillId: string, name: string, version: string, fileId: string }[] }
-const updates = shallowRef<Updates>({ newGames: [], versions: [] })
+
+const updates = shallowRef<SkillUpdates>({ newGames: [], versions: [] })
 const open = shallowRef(false)
 const busy = shallowRef(false)
 const error = shallowRef('')
@@ -15,20 +17,20 @@ const status = shallowRef('')
 const projects = useProjectsStore()
 async function check() {
   busy.value = true; error.value = ''; status.value = ''
-  try { updates.value = await nativeCall<Updates>('cloud_check_updates'); await projects.refresh(); open.value = !!(updates.value.newGames.length || updates.value.versions.length); if (!open.value) { status.value = '官方目录已是最新' } }
+  try { updates.value = await skillsService.checkUpdates(); await projects.refresh(); open.value = !!(updates.value.newGames.length || updates.value.versions.length); if (!open.value) { status.value = '官方目录已是最新' } }
   catch (cause) { error.value = (cause as Error).message }
   finally { busy.value = false }
 }
 async function confirm() {
   busy.value = true; error.value = ''
   try {
-    await nativeCall('cloud_confirm_updates', { gameIds: updates.value.newGames.map(game => game.id), fileIds: updates.value.versions.map(version => version.fileId) })
+    await skillsService.confirmUpdates(updates.value.newGames.map(game => game.id), updates.value.versions.map(version => version.fileId))
     open.value = false; status.value = '更新已确认'; await projects.refresh(); window.dispatchEvent(new Event('genmod-catalog-updated'))
   }
   catch (cause) { error.value = (cause as Error).message }
   finally { busy.value = false }
 }
-async function logout() { try { await nativeCall('cloud_logout'); window.dispatchEvent(new Event(authInvalidEvent)) } catch (cause) { error.value = (cause as Error).message } }
+async function logout() { try { await authService.logout() } catch (cause) { error.value = (cause as Error).message } }
 onMounted(check)
 </script>
 <template>

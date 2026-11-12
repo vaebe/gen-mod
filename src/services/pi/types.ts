@@ -13,6 +13,14 @@ export interface PiRecord {
   data?: Record<string, unknown>
   [key: string]: unknown
 }
+/** 回应绑定展示时的会话与运行代次。 */
+export interface ExtensionRequest extends PiRecord {
+  id: string
+  modId: string
+  sessionId: string
+  generation: number
+}
+export type ExtensionResponse = { value: string } | { confirmed: boolean } | { cancelled: true }
 export interface PiEnvelope {
   sequence: number
   subscription: number
@@ -41,7 +49,7 @@ export interface RuntimeSnapshot {
 export interface SubmissionResult {
   status: 'unknown' | 'pending' | 'accepted' | 'rejected'
   task?: TaskRecord | null
-  error?: string
+  error?: string | null
 }
 export interface PiSessionState {
   sessionId: string

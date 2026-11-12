@@ -40,5 +40,7 @@ GenMod 是一款 Windows 桌面工具，将 AI 对话、源码管理和 MOD 版�
 ## 更多
 
 - [开发文档](docs/README.md)
+- [当前架构与能力边界](docs/architecture/README.md)
+- [本轮优化实现与验证范围](docs/verification/2026-11-12-project-optimization.md)
 - [问题反馈](https://github.com/vaebe/gen-mod/issues)
 - 本项目参考了 [Orbit](https://github.com/ErKeLost/Orbit)。

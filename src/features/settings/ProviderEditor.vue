@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { ModelForm, ProviderApi, ProviderConfiguration } from '@/contracts/config'
+import type { ModelForm, ProviderApi, ProviderConfiguration } from '@/features/settings/types'
 import { defineAsyncComponent, reactive, shallowRef, useId } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { providerApis } from '@/contracts/config'
+import { providerApis } from '@/features/settings/types'
 
 const props = defineProps<{ provider?: ProviderConfiguration, existingIds: string[] }>()
 const emit = defineEmits<{ apply: [provider: ProviderConfiguration], cancel: [] }>()

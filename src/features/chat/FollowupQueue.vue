@@ -1,13 +1,14 @@
 <script setup lang="ts">
+import type { DeepReadonly } from 'vue'
 import type { SteeringInput } from '@/contracts/session'
-import type { FollowupInput } from '@/services/pi/followupQueue'
+import type { FollowupInput } from '@/features/sessions/followupQueue'
 import { ArrowUp, Pencil, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-defineProps<{ items: FollowupInput[], editingId?: string, pending: SteeringInput[], paused: boolean, busy: boolean, working: boolean, canSteer: boolean, canSend: boolean, hasDraft: boolean, readOnly: boolean, error: string }>()
+defineProps<{ items: readonly DeepReadonly<FollowupInput>[], editingId?: string, pending: SteeringInput[], paused: boolean, busy: boolean, working: boolean, canSteer: boolean, canSend: boolean, hasDraft: boolean, readOnly: boolean, error: string }>()
 defineEmits<{ edit: [id: string], remove: [id: string], deliver: [id: string], resume: [] }>()
-const labels: Record<FollowupInput['status'], string> = { pending: '待发送', sending: '正在发送…', accepted: '已发送，等待接收', unknown: '结果未确认，请重新连接核对，勿重复发送', failed: '发送失败，可编辑后重新提交', interrupted: '任务已失败、取消或中断，请核对执行结果后编辑或撤回', handled: '已由扩展接收' }
+const labels: Record<DeepReadonly<FollowupInput>['status'], string> = { pending: '待发送', sending: '正在发送…', accepted: '已发送，等待接收', unknown: '结果未确认，请重新连接核对，勿重复发送', failed: '发送失败，可编辑后重新提交', interrupted: '任务已失败、取消或中断，请核对执行结果后编辑或撤回', handled: '已由扩展接收' }
 </script>
 
 <template>

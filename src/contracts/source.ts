@@ -20,7 +20,7 @@ export interface SourceImportItem { sourcePath: string, targetName: string }
 export interface SourceMutationItem {
   source: string
   target: string
-  status: 'imported' | 'moved' | 'conflict' | 'failed'
+  status: 'imported' | 'moved' | 'copied' | 'deleted' | 'skipped' | 'conflict' | 'failed'
   message?: string | null
 }
 export interface SourceMutationResult {
@@ -28,3 +28,5 @@ export interface SourceMutationResult {
   sourceRevision: number
   items: SourceMutationItem[]
 }
+
+export interface SourceTransferItem { source: string, target: string, decision?: 'ask' | 'replace' | 'keep' | 'skip' }

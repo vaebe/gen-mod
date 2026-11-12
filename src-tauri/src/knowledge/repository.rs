@@ -3,7 +3,7 @@ use crate::storage::repository::{decode, encode};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
-// 列是状态与归属的唯一来源，旧 payload 只能提供正文、范围与来源。
+// 列是状态与归属的唯一来源，payload 提供正文、范围与来源。
 pub const NOTE_SELECT: &str = "SELECT json_set(payload,'$.noteId',note_id,'$.originModId',origin_mod_id,'$.gameId',game_id,'$.revision',revision,'$.status',status,'$.allowReuse',json(CASE WHEN allow_reuse<>0 THEN 'true' ELSE 'false' END),'$.userEdited',json(CASE WHEN user_edited<>0 THEN 'true' ELSE 'false' END),'$.memoryKey',memory_key,'$.createdAt',created_at,'$.updatedAt',updated_at) FROM knowledge_notes";
 
 pub fn content_hash(content: &str) -> String {
@@ -16,22 +16,6 @@ pub fn remember_content_on(db: &Connection, game: &str, id: &str, content: &str)
             params![game,content_hash(content),id]).map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-pub fn backfill_content_links_on(db: &Connection) -> Result<(), String> {
-    let mut query = db.prepare(&format!("{NOTE_SELECT} ORDER BY note_id")).map_err(|e| e.to_string())?;
-    let rows = query.query_map([], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
-    for row in rows {
-        let note: KnowledgeNote = decode(row.map_err(|e| e.to_string())?)?;
-        remember_content_on(db, &note.game_id, &note.note_id, &note.input.content)?;
-    }
-    Ok(())
-}
-
-/// 由迁移事务调用，正文指纹失败时必须连同表切换一并回滚。
-pub fn migrate_memory_on(db: &Connection) -> Result<(), String> {
-    db.execute_batch(include_str!("../storage/migrations/009_memory.sql")).map_err(|e| e.to_string())?;
-    backfill_content_links_on(db)
 }
 
 pub fn read_on(db: &Connection, id: &str) -> Result<KnowledgeNote, String> {
@@ -51,7 +35,6 @@ pub fn insert_global_on(db: &Connection, note: &KnowledgeNote) -> Result<(), Str
 pub fn insert_on(db: &Connection, mod_id: &str, note: &KnowledgeNote) -> Result<(), String> {
     let mut note = note.clone();
     note.origin_mod_id = Some(mod_id.into());
-    if note.memory_key.is_empty() { note.memory_key = format!("legacy:{}", note.note_id); }
     insert_global_on(db, &note)
 }
 
@@ -90,7 +73,7 @@ pub fn edit_entry_on(db: &mut Connection, id: &str, expected: i64, input: &Memor
     note.input.evidence_kind = "manual".into();
     note.user_edited = true;
     note.revision += 1;
-    note.updated_at = Some(crate::storage::mods::now()?);
+    note.updated_at = crate::storage::mods::now()?;
     write_on(&tx, &note, expected)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(note)
@@ -112,7 +95,7 @@ pub fn set_status_on(db: &mut Connection, id: &str, expected: i64, status: &str)
     note.status = status.into();
     note.user_edited = true;
     note.revision += 1;
-    note.updated_at = Some(crate::storage::mods::now()?);
+    note.updated_at = crate::storage::mods::now()?;
     if status == "active" { note.allow_reuse = true; }
     if status == "deleted" {
         note.input.title.clear(); note.input.content.clear(); note.input.route.clear(); note.input.source_refs.clear();
@@ -162,7 +145,7 @@ pub fn save_automatic_on(db: &mut Connection, task: &crate::pi::tasks::TaskConte
     drop(query);
     let result = |note: &KnowledgeNote, outcome| MemorySaveResult { outcome, note_id: note.note_id.clone(), revision: note.revision,
         title: if note.status == "deleted" { String::new() } else { note.input.title.clone() } };
-    if let Some(note) = matches.values().find(|note| note.user_edited || matches!(note.status.as_str(), "deleted" | "archived" | "candidate")) {
+    if let Some(note) = matches.values().find(|note| note.user_edited || matches!(note.status.as_str(), "deleted" | "archived")) {
         return Ok(result(note, "user_managed"));
     }
     // 正文指纹跨适用版本检查用户保护；普通 AI 条目的不同版本不能被误合并。
@@ -183,13 +166,13 @@ pub fn save_automatic_on(db: &mut Connection, task: &crate::pi::tasks::TaskConte
         note.revision += 1;
         note.input.title = input.title.clone(); note.input.content = input.content.clone();
         note.input.source_refs = input.source_refs.clone(); note.input.evidence_kind = input.evidence_kind.clone();
-        note.updated_at = Some(now);
+        note.updated_at = now;
         write_on(&tx, &note, expected)?;
         note
     } else {
         let note = KnowledgeNote { note_id: uuid::Uuid::new_v4().to_string(), revision: 1, game_id: game.into(), status: "active".into(), allow_reuse: true,
             origin_mod_id: Some(task.mod_id.clone()), origin_project_name: Some(project_name.into()), user_edited: false,
-            memory_key: key, created_at: Some(now.clone()), updated_at: Some(now),
+            memory_key: key, created_at: now.clone(), updated_at: now,
             input: KnowledgeInput { title: input.title.clone(), content: input.content.clone(), version_scope: input.version_scope.clone(), game_version: input.game_version.clone(),
                 route: input.topic_key.clone(), evidence_kind: input.evidence_kind.clone(), source_refs: input.source_refs.clone() } };
         insert_global_on(&tx, &note)?;

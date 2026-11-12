@@ -22,7 +22,6 @@ pub(crate) fn validate_command_on(db: &Connection, task: &TaskContext, source: &
     if record.context.mod_id != task.mod_id || record.context.task_id != task_id { return Err("命令任务身份不一致".into()); }
     if !record.commands.iter().any(|receipt| receipt.command_id == source.id && receipt.task_id == task_id
         && matches!(receipt.status.as_str(), "succeeded" | "failed" | "cancelled")) { return Err("没有对应的真实命令回执".into()); }
-    if record.context.context_snapshot_id.is_none() { return Ok(None); }
     Ok(crate::project_context::repository::snapshot_for_task_on(db, &task.mod_id, task_id)?.context.game_version.map(|value| value.value))
 }
 

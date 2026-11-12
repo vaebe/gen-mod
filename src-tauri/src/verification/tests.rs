@@ -2,14 +2,11 @@ use super::{models::*, repository::*};
 use rusqlite::Connection;
 fn fixture() -> Connection {
     let db = Connection::open_in_memory().unwrap();
-    db.execute_batch("PRAGMA foreign_keys=ON;CREATE TABLE projects(mod_id TEXT PRIMARY KEY);INSERT INTO projects VALUES('a'),('b');").unwrap();
-    db.execute_batch(include_str!(
-        "../storage/migrations/004_delivery_metadata.sql"
-    ))
-    .unwrap();
-    db.execute_batch(include_str!("../storage/migrations/005_verification.sql"))
-        .unwrap();
-    let version = crate::storage::models::ArtifactVersion {
+    db.execute_batch(include_str!("../storage/schema.sql")).unwrap();
+    db.execute_batch("PRAGMA foreign_keys=ON;INSERT INTO projects(mod_id,payload) VALUES('a','{}'),('b','{}');").unwrap();
+    let version = crate::artifacts::models::ArtifactVersion {
+        summary: "当前交付摘要".into(),
+        session_id: "s".into(),
         version_id: "v1".into(),
         task_id: "t1".into(),
         created_at: "now".into(),

@@ -6,12 +6,6 @@ pub fn initialize_on(db:&Connection,id:&str)->Result<(),String>{
     db.execute("INSERT INTO project_contexts(mod_id,revision,payload) SELECT ?1,0,?2 WHERE EXISTS(SELECT 1 FROM projects WHERE mod_id=?1) ON CONFLICT(mod_id) DO NOTHING",params![id,encode(&value)?]).map_err(|e|e.to_string())?;
     Ok(())
 }
-pub fn backfill(app:&tauri::AppHandle)->Result<(),String>{
-    let db=crate::storage::database::connect(app)?;
-    let mut query=db.prepare("SELECT mod_id FROM projects").map_err(|e|e.to_string())?;
-    for id in query.query_map([],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())? {initialize_on(&db,&id.map_err(|e|e.to_string())?)?;}
-    Ok(())
-}
 pub fn read_on(db: &Connection, id: &str) -> Result<ProjectContext, String> {
     let exists: bool = db
         .query_row(

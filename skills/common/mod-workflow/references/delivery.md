@@ -2,7 +2,7 @@
 
 `run_command` 参数：`program`、`args`（字符串数组）、`cwd`（相对源码目录，默认 `.`）。返回真实 commandId、toolCallId、exitCode、status、logPath，只有 status=succeeded 且 exitCode=0 可作为交付依据。
 
-`prepare_delivery` 参数：`files: [{source, target}]`、`commandIds: string[]`、`targetDirectoryHint: string`。source 相对当前源码目录；target 相对用户以后所选安装目录。例：source 为 `.delivery/<taskId>/ExampleMod.dll`，target 为 `ExampleMod/ExampleMod.dll`。路径统一 `/`；禁止绝对路径、`..`、符号链接和重复安装目标。
+`prepare_delivery` 参数：`summary: string`（必填，概括本次实际交付变化，去除首尾空白后不能为空）、`files: [{source, target}]`、`commandIds: string[]`、`targetDirectoryHint: string`。source 相对当前源码目录；target 相对用户以后所选安装目录。例：source 为 `.delivery/<taskId>/ExampleMod.dll`，target 为 `ExampleMod/ExampleMod.dll`。路径统一 `/`；禁止绝对路径、`..`、符号链接和重复安装目标。
 
 工具从原生注入的上下文取得 taskId/stagingId，不接受模型自行填写这两个字段。工具将文件复制至本任务 staging/files，生成 install.json、文件清单和 mod.zip。打包使用PowerShell 调用 .NET ZipFile，其真实退出码也会登记。原生仅在成功工具结束事件登记版本，失败或旧任务申请不生成版本。
 

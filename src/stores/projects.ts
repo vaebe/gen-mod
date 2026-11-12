@@ -1,7 +1,7 @@
 import type { ModProject } from '@/contracts/mod'
 import { defineStore } from 'pinia'
 import { shallowRef } from 'vue'
-import { modService, nativeCall } from '@/services/native'
+import { modService } from '@/features/projects/service'
 
 /** 跨页面共享项目列表，读取失败不能伪装成空项目。 */
 export const useProjectsStore = defineStore('projects', () => {
@@ -16,16 +16,13 @@ export const useProjectsStore = defineStore('projects', () => {
     loading.value = true
     error.value = ''
     try {
-      const [values, failures, recoveries] = await Promise.all([modService.list(), nativeCall<{ modId: string, error: string }[]>('list_migration_errors'), nativeCall<{ modId: string, kind: string }[]>('list_recovery_issues')])
+      const [values, recoveries] = await Promise.all([modService.list(), modService.recoveryIssues()])
       if (epoch !== generation) {
         return
       }
       projects.value = values.filter(project => !project.archived)
       if (recoveries.length) {
         error.value = recoveries.map(item => `文件操作需核对 ${item.modId}：${item.kind}`).join('；')
-      }
-      if (failures.length) {
-        error.value = failures.map(item => `迁移失败 ${item.modId}：${item.error}`).join('；')
       }
     }
     catch (cause) {

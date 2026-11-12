@@ -4,7 +4,7 @@ import MarkdownRender from 'markstream-vue'
 import { shallowRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { nativeCall } from '@/services/native'
+import { skillsService } from '@/features/skills/service'
 import 'markstream-vue/index.css'
 
 const props = defineProps<{ skill: SkillView }>()
@@ -32,7 +32,7 @@ watch(() => [open.value, props.skill.name] as const, async ([visible, name], _, 
   }
   loading.value = true
   try {
-    const text = await nativeCall<string>('read_skill_content', { name })
+    const text = await skillsService.content(name)
     if (current) {
       content.value = text
     }
@@ -53,7 +53,7 @@ watch(() => [open.value, props.skill.name] as const, async ([visible, name], _, 
 async function reveal(): Promise<void> {
   error.value = ''
   try {
-    await nativeCall('reveal_skill_file', { name: props.skill.name })
+    await skillsService.reveal(props.skill.name)
   }
   catch (cause) { error.value = (cause as Error).message }
 }

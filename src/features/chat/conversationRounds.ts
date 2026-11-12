@@ -1,12 +1,14 @@
+import type { DeepReadonly } from 'vue'
 import type { ChatMessage } from '@/contracts/session'
 import type { TaskRecord } from '@/contracts/task'
 
 export interface ConversationRound {
   id: string
-  user?: ChatMessage
-  supplements?: ChatMessage[]
-  process: ChatMessage[]
-  answer?: ChatMessage
+  taskId?: string
+  user?: DeepReadonly<ChatMessage>
+  supplements?: DeepReadonly<ChatMessage>[]
+  process: DeepReadonly<ChatMessage>[]
+  answer?: DeepReadonly<ChatMessage>
   startedAt?: number
   endedAt?: number
   running: boolean
@@ -14,7 +16,7 @@ export interface ConversationRound {
 }
 
 /** 按用户需求归并一轮的模型/工具消息；终态正文放在过程区域外。 */
-export function conversationRounds(messages: ChatMessage[], tasks: TaskRecord[], working: boolean, startedAt?: number, endedAt?: number): ConversationRound[] {
+export function conversationRounds(messages: readonly DeepReadonly<ChatMessage>[], tasks: TaskRecord[], working: boolean, startedAt?: number, endedAt?: number): ConversationRound[] {
   const rounds: ConversationRound[] = []
   for (const message of messages) {
     if (message.role === 'user') {
@@ -43,8 +45,12 @@ export function conversationRounds(messages: ChatMessage[], tasks: TaskRecord[],
     const latest = index === rounds.length - 1
     round.running = latest && working
     const anchor = round.user?.timestamp ?? round.process[0]?.timestamp
-    const candidates = anchor === undefined ? [] : sorted.filter(item => Date.parse(item.context.createdAt) <= anchor)
-    const task = candidates[candidates.length - 1]
+    const anchorMessage = round.user ?? round.process[0]
+    // 仅已确认的历史消息允许按时间兼容匹配，本地占位或失败消息不能借用上一轮交付。
+    const candidates = anchor === undefined || !anchorMessage?.final || anchorMessage.error ? [] : sorted.filter(item => Date.parse(item.context.createdAt) <= anchor)
+    const explicitTaskId = round.user?.taskId ?? round.process.find(message => message.taskId)?.taskId
+    const task = explicitTaskId ? sorted.find(item => item.context.taskId === explicitTaskId) : candidates[candidates.length - 1]
+    round.taskId = task?.context.taskId
     round.status = task?.status
     const live = latest && startedAt !== undefined && (anchor === undefined || anchor >= startedAt)
     round.startedAt = live ? startedAt : task ? Date.parse(task.context.createdAt) : undefined

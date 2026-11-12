@@ -1,6 +1,6 @@
-import type { MemorySaveResult } from './knowledge'
-import type { ProjectMemoryUpdateResult } from './project-context'
 import type { SkillSnapshot } from './skill'
+import type { MemorySaveResult } from '@/features/knowledge/types'
+import type { ProjectMemoryUpdateResult } from '@/features/project-memory/types'
 
 /** pi 会话文件是历史权威；此处只保存关联信息。 */
 export interface SessionReference {
@@ -9,7 +9,7 @@ export interface SessionReference {
   skills: SkillSnapshot[]
   readOnly: boolean
   /** 空名称显示“新会话”；首轮完成后生成标题。 */
-  name?: string
+  name: string
 }
 
 export type MessagePart
@@ -68,3 +68,15 @@ export interface ToolRun {
 
 /** 仅应用引导关联；正式历史仍来自 pi JSONL。 */
 export interface SteeringInput { inputId: string, taskId: string, status: string, message: string, submittedAt: string, messageTimestamp?: number, entryId?: string }
+
+/** 操作发起时捕获的身份，异步结果始终归此会话。 */
+export interface SessionIdentity { modId: string, sessionId: string }
+
+export interface SessionSummary {
+  readonly initialized: boolean
+  readonly busy: boolean
+  readonly running: boolean
+  readonly activity: string
+}
+
+export interface RuntimeLogEntry { timestamp: string, generation: number, taskId?: string, message: string }

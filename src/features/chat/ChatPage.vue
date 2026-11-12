@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { ModProject } from '@/contracts/mod'
-import type { PromptAttachment } from '@/contracts/session'
 import type { TaskRecord } from '@/contracts/task'
-import type { VerificationRecord } from '@/contracts/verification'
+import type { VerificationRecord } from '@/features/verification/types'
 import { RotateCw, Unplug } from '@lucide/vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
@@ -11,11 +10,15 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
+import { useDeliveriesStore } from '@/features/delivery/useDeliveries'
+import { modService } from '@/features/projects/service'
+import { sessionService } from '@/features/sessions/service'
+import { useSessionStore } from '@/features/sessions/useSessionStore'
 import { useConfiguration } from '@/features/settings/useConfiguration'
 import { useVerification } from '@/features/verification/useVerification'
-import { modService, nativeCall } from '@/services/native'
+import { referencePrompt, removeSourceReference, sourceLeaveGuards, sourceReferences } from '@/features/workspace/sourceWorkspace'
+import { sourceRevision } from '@/features/workspace/useTaskChanges'
 import { useProjectsStore } from '@/stores/projects'
-import { useSessionStore } from '@/stores/session'
 import { readAttachments } from './attachments'
 import ChatComposer from './ChatComposer.vue'
 import MessageTimeline from './MessageTimeline.vue'
@@ -41,54 +44,55 @@ const { requirement, error: saveError } = draft
 const configuration = useConfiguration()
 const { status } = configuration
 const session = useSessionStore()
+const deliveries = useDeliveriesStore()
 const timelineMessages = computed(() => session.chat.messages.filter(message => message.final || (!message.inputId && !session.followups.items.some(item => item.id === message.id))))
 const pendingSteering = computed(() => session.steeringInputs.filter(input => input.status !== 'confirmed' && !session.followups.items.some(item => item.id === input.inputId)))
 async function editFollowup(id: string): Promise<void> {
-  const target = session.stateFor(session.modId, session.sessionId)
-  if (!target || target.readOnly || sending.value || editingFollowup.value || readingAttachments.value) {
-    return
-  }
-  if (requirement.value || target.attachments.length) {
-    target.followups.error = '输入框已有草稿，请先处理草稿，再编辑待发送消息'
+  const target = { modId: session.modId, sessionId: session.sessionId }
+  if (session.readOnly || sending.value || editingFollowup.value || readingAttachments.value) {
     return
   }
   editingFollowup.value = true
   try {
-    followupEdit = target.followups.remove(id, (item) => {
-      if (session.selectedKey !== `${target.modId}/${target.sessionId}` || requirement.value || target.attachments.length) {
+    followupEdit = session.editFollowup(target, id, (text) => {
+      if (!session.isSelected(target) || requirement.value) {
         throw new Error('输入框已有草稿，请先处理草稿，再编辑待发送消息')
       }
-      requirement.value = item.text
-      target.attachments = item.attachments
+      requirement.value = text
       return () => draft.flush()
     })
     await followupEdit
   }
-  catch (cause) { target.followups.error = (cause as Error).message }
+  catch { /* 错误由原会话队列展示。 */ }
   finally {
     followupEdit = undefined
     editingFollowup.value = false
   }
 }
 async function operateFollowup(action: 'remove' | 'deliver' | 'resume', id = ''): Promise<void> {
-  const target = session.stateFor(session.modId, session.sessionId)
-  if (!target || target.readOnly) {
+  const target = { modId: session.modId, sessionId: session.sessionId }
+  if (session.readOnly) {
     return
   }
   try {
-    if (action === 'remove') {
-      await target.followups.remove(id)
+    if (action !== 'remove') {
+      const guard = sourceLeaveGuards.get(target.modId)
+      if (guard && !await guard()) {
+        return
+      }
+      if (!session.isSelected(target)) {
+        return
+      }
     }
-    else if (action === 'resume') {
-      await target.resumeQueue()
-    }
-    else {
-      await target.followups.deliver(id, target.working ? 'steer' : 'prompt')
+    await session.operateFollowup(target, action, id)
+  }
+  catch (cause) {
+    if (session.isSelected(target)) {
+      error.value = (cause as Error).message
     }
   }
-  catch (cause) { target.followups.error = (cause as Error).message }
 }
-const verification = useVerification(() => project.value?.modId, () => session.verificationRevision)
+const verification = useVerification(() => project.value?.modId)
 const pendingFeedback = computed(() => verification.data.value.drafts.filter(d => d.status === 'pending' && d.payload.sourceRefs.some(ref => ref.sessionId === session.sessionId)))
 async function repair(record: VerificationRecord): Promise<void> {
   const target = project.value?.modId
@@ -104,9 +108,7 @@ async function repair(record: VerificationRecord): Promise<void> {
   }
   requirement.value = requirement.value.trim() ? `${requirement.value}\n\n${text}` : text
 }
-const attachments = computed({ get: () => session.attachments, set: (value: PromptAttachment[]) => {
-  session.attachments = value
-} })
+const attachments = computed(() => session.attachments)
 const projects = useProjectsStore()
 const connectionIssue = computed(() => session.connectionError)
 const operationIssue = computed(() => error.value || session.error || session.modelState?.error || configuration.error.value)
@@ -118,11 +120,8 @@ const modelConfigured = computed(() => {
   }
   return !!status.value?.providers.some(provider => provider.id === selected.selection.providerId && provider.keyConfigured && provider.models.some(model => model.id === selected.selection.modelId))
 })
-watch(() => [status.value, session.selectedKey], () => {
-  const target = session.stateFor(session.modId, session.sessionId)
-  if (target?.initialized) {
-    void target.refreshModel().catch(cause => target.error = cause.message)
-  }
+watch(() => [status.value, session.selectionId], () => {
+  void session.refreshModel()
 })
 const runtimeClosed = computed(() => connectionIssue.value === 'pi 进程已退出')
 const reconnectId = computed(() => session.sessionId || String(route.query.session ?? ''))
@@ -142,7 +141,7 @@ async function attachFiles(files: File[]): Promise<void> {
   try {
     const added = await readAttachments(files, attachments.value)
     if (generation === attachmentGeneration) {
-      attachments.value = [...attachments.value, ...added]
+      session.addAttachments(added)
     }
   }
   catch (cause) {
@@ -180,20 +179,19 @@ async function openSession(id?: string, readOnly = false): Promise<void> {
     if (epoch !== loadGeneration || project.value?.modId !== modId || (id && session.sessionId !== id)) {
       return
     }
-    const metadata = await nativeCall<{ draft: string }>('read_session_metadata', { modId, sessionId: session.sessionId })
+    const metadata = await sessionService.metadata({ modId, sessionId: session.sessionId })
     if (epoch !== loadGeneration) {
       return
     }
     draft.load(modId, metadata.draft, session.sessionId)
-    const records = await nativeCall<TaskRecord[]>('list_mod_tasks', { modId })
+    const records = await sessionService.tasks({ modId })
     if (epoch !== loadGeneration) {
       return
     }
     tasks.value = records
-    session.task = tasks.value.find(item => item.context.sessionId === session.sessionId)?.context
     project.value = await modService.get(project.value.modId)
     projects.upsert(project.value)
-    session.readOnly = project.value.archived || (project.value.sessions.find(item => item.sessionId === session.sessionId)?.readOnly ?? readOnly)
+    session.syncProjectAccess(project.value)
   }
   catch (cause) { error.value = (cause as Error).message }
   finally {
@@ -239,14 +237,14 @@ watch(() => [String(route.params.modId), String(route.query.session ?? ''), Stri
     if (requested && !previous && !fresh) {
       throw new Error('该会话已删除或不属于当前项目')
     }
-    if (!fresh && previous?.sessionId === session.sessionId && session.modId === id && session.stateFor(id, previous.sessionId)?.initialized) {
-      session.readOnly = value.archived || previous.readOnly
-      const metadata = await nativeCall<{ draft: string }>('read_session_metadata', { modId: id, sessionId: previous.sessionId })
+    if (!fresh && previous?.sessionId === session.sessionId && session.modId === id && session.summaryFor(id, previous.sessionId)?.initialized) {
+      session.syncProjectAccess(value)
+      const metadata = await sessionService.metadata({ modId: id, sessionId: previous.sessionId })
       if (generation !== loadGeneration) {
         return
       }
       draft.load(id, metadata.draft, previous.sessionId)
-      const records = await nativeCall<TaskRecord[]>('list_mod_tasks', { modId: id })
+      const records = await sessionService.tasks({ modId: id })
       if (generation !== loadGeneration) {
         return
       }
@@ -255,7 +253,7 @@ watch(() => [String(route.params.modId), String(route.query.session ?? ''), Stri
     }
     await openSession(previous?.sessionId, previous?.readOnly)
     if (generation === loadGeneration && session.sessionId && !error.value) {
-      await router.replace({ path: route.path, query: { session: session.sessionId, ...(route.query.repair ? { repair: route.query.repair } : {}) } })
+      await router.replace({ path: route.path, query: { session: session.sessionId, ...(route.query.repair ? { repair: route.query.repair } : {}), ...(route.query.task ? { task: route.query.task } : {}) } })
     }
   }
   catch (cause) {
@@ -270,75 +268,64 @@ watch(() => [String(route.params.modId), String(route.query.session ?? ''), Stri
   }
 }, { immediate: true })
 
+function rememberTarget(target: { modId: string, directory: string }): void {
+  if (project.value?.modId !== target.modId) {
+    return
+  }
+  const current = projects.projects.find(project => project.modId === target.modId) ?? project.value
+  project.value = { ...current, lastDeploymentDirectory: target.directory }
+  projects.upsert(project.value)
+}
+
 async function send(): Promise<void> {
   if (sending.value || editingFollowup.value || readingAttachments.value || opening.value || session.readOnly || session.followups.busy || (session.busy && !session.working)) {
     return
   }
-  const submittingKey = session.selectedKey
-  const target = session.stateFor(session.modId, session.sessionId)
-  if (!target || (!requirement.value.trim() && !attachments.value.length)) {
+  const submittingKey = session.selectionId
+  const target = { modId: session.modId, sessionId: session.sessionId }
+  if (!target.sessionId || (!requirement.value.trim() && !attachments.value.length && !sourceReferences.value[target.modId]?.length)) {
     return
   }
-  const submitted = requirement.value
-  const selected = attachments.value
-  const textFiles = selected.filter(file => file.type === 'text').map(file => `附件文件：${file.name}\n${file.text}`).join('\n\n')
-  const message = [submitted.trim() || (selected.length ? '请根据附件继续处理当前 MOD。' : ''), textFiles].filter(Boolean).join('\n\n')
-  const images = selected.filter(file => file.type === 'image').map(file => ({ type: 'image' as const, data: file.data, mimeType: file.mimeType }))
-  const previousIds = new Set(target.chat.messages.map(item => item.id))
-  const enqueue = target.working || !!target.followups.editingId || target.followups.items.some(item => item.status === 'pending')
   sending.value = true
-  const submission = draft.captureSubmitted()
-  target.attachments = target.attachments.filter(file => !selected.some(sent => sent.id === file.id))
-  let restore = false
   error.value = ''
   try {
-    if (enqueue) {
-      if (!await submission.save()) {
-        throw new Error('草稿保存失败，未加入队列')
-      }
-      await target.followups.add({ text: submitted, message, attachments: selected, images })
+    const guard = sourceLeaveGuards.get(target.modId)
+    if (guard && !await guard()) {
+      return
     }
-    else {
-      await target.send(message, images, submission.save, { text: submitted, attachments: selected })
+    const reference = await referencePrompt(target.modId)
+    if (session.selectionId !== submittingKey) {
+      return
+    }
+    const submitted = [requirement.value, reference.text].filter(Boolean).join('\n\n')
+    const saved = await session.submitInput(target, submitted, draft.captureSubmitted)
+    for (const entry of reference.entries) {
+      removeSourceReference(target.modId, entry.path)
+    }
+    if (!saved && session.selectionId === submittingKey) {
+      error.value = '消息已提交，草稿保存失败，请勿重复发送'
     }
   }
   catch (cause) {
-    const confirmed = target.chat.messages.some(item => !previousIds.has(item.id) && item.role === 'user' && (item.final || (item.inputStatus && !['submitted', 'failed', 'unknown'].includes(item.inputStatus))))
-    restore = enqueue || (!confirmed && !target.uncertain && !/超时|未确认/.test((cause as Error).message))
-    if (restore) {
-      target.attachments = [...selected, ...target.attachments.filter(file => !selected.some(sent => sent.id === file.id))]
-    }
-    if (session.selectedKey === submittingKey) {
+    if (session.selectionId === submittingKey) {
       error.value = (cause as Error).message
     }
   }
-  finally {
-    try {
-      const saved = await submission.finish(restore, target.uncertain)
-      if (!saved && !restore && session.selectedKey === submittingKey) {
-        error.value = '消息已提交，草稿保存失败，请勿重复发送'
-      }
-    }
-    finally { sending.value = false }
-  }
+  finally { sending.value = false }
 }
 
-/** 只恢复被明确拒绝的输入；新草稿存在时保留独立副本，避免覆盖。 */
 async function restorePendingInput(): Promise<void> {
-  const target = session.stateFor(session.modId, session.sessionId)
-  const value = target?.pendingInput
-  if (!target || !value || target.pendingStatus !== 'rejected') {
-    return
+  const target = { modId: session.modId, sessionId: session.sessionId }
+  try {
+    await session.restorePendingInput(target, (text) => {
+      if (requirement.value && requirement.value !== text) {
+        throw new Error('当前已有新草稿，请先保存或移走草稿，再恢复保留的提交')
+      }
+      requirement.value = text
+      return () => draft.flush()
+    })
   }
-  if (requirement.value && requirement.value !== value.text) {
-    error.value = '当前已有新草稿，请先保存或移走草稿，再恢复保留的提交'
-    return
-  }
-  requirement.value = value.text
-  target.attachments = [...value.attachments, ...target.attachments.filter(file => !value.attachments.some(original => original.id === file.id))]
-  if (await draft.flush()) {
-    await target.clearPending()
-  }
+  catch (cause) { error.value = (cause as Error).message }
 }
 const handledRepair = new Set<string>()
 watch(() => [String(route.query.repair ?? ''), opening.value, loadingProject.value, verification.data.value.records] as const, async ([recordId, isOpening, isLoading, records]) => {
@@ -366,24 +353,34 @@ async function leave(): Promise<boolean> {
   }
   return project.value && (project.value.archived || projects.isRemoved(project.value.modId)) ? true : draft.flush()
 }
+watch(() => deliveries.projectFor(project.value?.modId ?? ''), (value) => {
+  if (value && value.modId === project.value?.modId) {
+    project.value = value
+  }
+})
 /** 原生终态事件之后读取任务结束时间及新版本，不用前端猜测完成。 */
-watch(() => [session.changeRevision, session.artifactRevision, session.task?.taskId], async () => {
+watch(() => [session.modId, session.sessionId, sourceRevision(session.modId), deliveries.revisionFor(session.modId), session.task?.taskId], async (_value, _previous, onCleanup) => {
+  let valid = true
+  onCleanup(() => {
+    valid = false
+  })
   const id = project.value?.modId
   if (!id || session.modId !== id) {
     return
   }
   try {
-    const records = await nativeCall<TaskRecord[]>('list_mod_tasks', { modId: id })
-    const value = await modService.get(id)
-    if (project.value?.modId !== id) {
+    const records = await sessionService.tasks({ modId: id })
+    if (!valid || project.value?.modId !== id) {
       return
     }
     tasks.value = records
-    project.value = value
-    projects.upsert(value)
   }
-  catch (cause) { error.value = (cause as Error).message }
-})
+  catch (cause) {
+    if (valid) {
+      error.value = (cause as Error).message
+    }
+  }
+}, { flush: 'sync' })
 onBeforeUnmount(() => {
   if (saveTimer) {
     clearTimeout(saveTimer)
@@ -430,7 +427,7 @@ onBeforeRouteUpdate(leave)
     <p v-if="opening" class="px-5 py-3 text-xs text-muted-foreground">
       正在同步会话状态…
     </p>
-    <MessageTimeline v-if="project && session.modId === project.modId && (session.chat.messages.length || session.working)" :key="`${session.modId}-${session.sessionId}`" :messages="timelineMessages" :tools="session.chat.tools" :mod-id="String(route.params.modId)" :tasks="tasks.filter(item => item.context.sessionId === session.sessionId)" :working="session.working" :started-at="session.startedAt" :ended-at="session.endedAt" :activity="session.activity" :last-activity-at="session.lastActivityAt" :feedback-drafts="pendingFeedback" :verification-records="verification.data.value.records" @feedback-changed="verification.refresh" />
+    <MessageTimeline v-if="project && session.modId === project.modId && (session.chat.messages.length || session.working)" :key="`${session.modId}-${session.sessionId}`" :project="project" :focus-task-id="String(route.query.task ?? '')" :messages="timelineMessages" :tools="session.chat.tools" :mod-id="String(route.params.modId)" :tasks="tasks.filter(item => item.context.sessionId === session.sessionId)" :working="session.working" :started-at="session.startedAt" :ended-at="session.endedAt" :activity="session.activity" :last-activity-at="session.lastActivityAt" :feedback-drafts="pendingFeedback" :verification-records="verification.data.value.records" @target-selected="rememberTarget" @feedback-changed="verification.refresh" />
     <div v-else-if="loadingProject || opening" role="status" class="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
       <Spinner aria-hidden="true" />
       <span>正在加载会话…</span>
@@ -463,6 +460,6 @@ onBeforeRouteUpdate(leave)
       {{ project?.archived ? '项目已归档，仅可查看；在全部项目的“已归档项目”中恢复后继续制作。' : '此会话使用旧的能力上下文，只能查看历史。创建新会话继续开发。' }}
     </p>
     <FollowupQueue v-if="project" :items="session.followups.items" :editing-id="session.followups.editingId" :pending="pendingSteering" :paused="session.followups.paused" :busy="session.followups.busy || sending || readingAttachments || opening" :working="session.working" :can-steer="session.canSteer" :can-send="!session.busy && !session.pendingInput && modelConfigured" :has-draft="!!requirement || !!attachments.length" :read-only="session.readOnly" :error="session.followups.error" @edit="editFollowup" @remove="operateFollowup('remove', $event)" @deliver="operateFollowup('deliver', $event)" @resume="operateFollowup('resume')" />
-    <ChatComposer v-if="project && !session.readOnly" v-model="requirement" :restoring="editingFollowup" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-queue="session.working && !sending && !opening && !session.followups.busy" :stopping="session.stopping" :busy="session.busy || sending || opening || session.followups.busy" :configured="modelConfigured && !opening" :providers="status?.providers || []" :model-state="session.modelState" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="attachments = attachments.filter(file => file.id !== $event)" @send="send" @save="draft.flush" @cancel="session.abort" @model="session.selectModel" @thinking="session.setThinking" @compact="session.compact" />
+    <ChatComposer v-if="project && !session.readOnly" v-model="requirement" :restoring="editingFollowup" :attachments="attachments" :reading-attachments="readingAttachments" :working="session.working" :can-queue="session.working && !sending && !opening && !session.followups.busy" :stopping="session.stopping" :busy="session.busy || sending || opening || session.followups.busy" :configured="modelConfigured && !opening" :providers="status?.providers || []" :model-state="session.modelState" :error="attachmentError || saveError" :thinking-level="session.thinkingLevel" :thinking-levels="session.thinkingLevels" :context-usage="session.contextUsage" :compacting="session.compacting" :can-compact="!!session.chat.messages.length" @files="attachFiles" @remove-attachment="session.removeAttachment" @send="send" @save="draft.flush" @cancel="session.abort" @model="session.selectModel" @thinking="session.setThinking" @compact="session.compact" />
   </div>
 </template>

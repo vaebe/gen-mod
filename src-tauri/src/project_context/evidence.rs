@@ -1,5 +1,5 @@
 use super::models::*;
-use crate::{pi::tasks::{TaskContext,TaskRecord},storage::{database,repository::{decode,task}}};
+use crate::{pi::tasks::{TaskContext,TaskRecord,task},storage::{database,repository::decode}};
 use rusqlite::{Connection,params};
 use serde_json::{Value,json};
 
@@ -61,7 +61,7 @@ pub fn sources(app:&tauri::AppHandle,context:&TaskContext)->Result<Value,String>
     let record=task(app,&context.mod_id,&context.task_id)?;
     result["commands"]=json!(record.commands.iter().rev().take(20).map(|r|json!({"taskId":r.task_id,"commandId":r.command_id,"status":r.status,"exitCode":r.exit_code,"program":r.program,"args":r.args,"outputTail":r.output_tail.chars().take(2000).collect::<String>()})).collect::<Vec<_>>());
     let memory=super::repository::read_on(&database::connect(app)?,&context.mod_id)?;
-    let ids:std::collections::BTreeSet<_>=memory.reference_sets.iter().filter_map(|set|set.source_report_id.clone()).collect();
+    let ids:std::collections::BTreeSet<_>=memory.reference_sets.iter().map(|set|set.source_report_id.clone()).collect();
     result["inspectionReportIds"]=json!(ids);
     Ok(result)
 }

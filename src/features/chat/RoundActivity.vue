@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DeepReadonly } from 'vue'
 import type { ConversationRound } from './conversationRounds'
 import type { ToolRun } from '@/contracts/session'
 import { ChevronRight, LoaderCircle } from '@lucide/vue'
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import MessageParts from './MessageParts.vue'
 
-const props = defineProps<{ round: ConversationRound, tools: Record<string, ToolRun>, modId: string, activity: string, lastActivityAt: number }>()
+const props = defineProps<{ round: ConversationRound, tools: Record<string, DeepReadonly<ToolRun>>, modId: string, activity: string, lastActivityAt: number }>()
 const now = shallowRef(Date.now())
 const processOpen = shallowRef(false)
 const following = shallowRef(true)

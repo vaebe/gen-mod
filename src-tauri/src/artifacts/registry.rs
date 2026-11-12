@@ -1,5 +1,5 @@
 use super::models::{Delivery, InstallManifest};
-use crate::{changes::{file_hash, relative_path}, pi::tasks::TaskRecord, storage::{mods, paths, models::{ArtifactFile, ArtifactVersion, DevelopmentStatus}}};
+use crate::{changes::{file_hash, relative_path}, pi::tasks::TaskRecord, storage::{mods, paths}, artifacts::models::{ArtifactFile, ArtifactVersion}};
 use sha2::{Digest, Sha256};
 use std::{collections::{BTreeMap, BTreeSet}, fs, io::Read, path::{Path, PathBuf}};
 use tauri::Manager;
@@ -38,6 +38,7 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
     let project = mods::read_project(app, &task.context.mod_id)?;
     if let Some(id) = &task.registered_version_id { return project.versions.iter().find(|v| &v.version_id == id).cloned().ok_or("已登记版本记录缺失".into()); }
     if task.status != "running" { return Err("只有活动任务能够首次登记版本".into()); }
+    let summary = input["summary"].as_str().map(str::trim).filter(|value| !value.is_empty()).ok_or("请补充本次实际交付变化的简短摘要后重试")?;
     if delivery.command_ids.is_empty() { return Err("交付缺少成功命令".into()); }
     let mut ids = BTreeSet::new();
     let mut successful = vec![];
@@ -45,7 +46,7 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
         if !ids.insert(id) { return Err("交付命令 ID 重复".into()); }
         let receipt = task.commands.iter().find(|c| &c.command_id == id).ok_or("交付使用未知命令 ID")?;
         if receipt.status != "succeeded" || receipt.exit_code != Some(0) { return Err("交付使用失败或取消的命令".into()); }
-        if receipt.source_revision != Some(delivery.source_revision) { return Err("构建后源码已变化或旧回执缺少 revision，请重新构建".into()); }
+        if receipt.source_revision != delivery.source_revision { return Err("构建后源码已变化，请重新构建".into()); }
         successful.push(receipt);
     }
     let mut requires_fresh_output = false;
@@ -99,7 +100,7 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
     if report.findings.iter().any(|f|f.level=="block"){return Err(format!("最终交付内容检查拒绝：{}；需要新任务",serde_json::to_string(&report).map_err(|e|e.to_string())?));}
     let cases:Vec<super::delivery_metadata::VerificationCase>=input.get("verificationCases").map(|v|serde_json::from_value(v.clone())).transpose().map_err(|e|e.to_string())?.unwrap_or_default();
     super::delivery_metadata::validate_cases(&cases)?;
-    let version = ArtifactVersion { version_id: uuid::Uuid::new_v4().to_string(), task_id: task.context.task_id.clone(), created_at: mods::now()?, skills: crate::skills::registry::snapshots(&crate::skills::registry::task_views(app,&task.context)?), files: prepared, zip_sha256: file_hash(&zip_path)? };
+    let version = ArtifactVersion { summary: summary.to_string(), session_id: task.context.session_id.clone(), version_id: uuid::Uuid::new_v4().to_string(), task_id: task.context.task_id.clone(), created_at: mods::now()?, skills: crate::skills::registry::snapshots(&crate::skills::registry::task_views(app,&task.context)?), files: prepared, zip_sha256: file_hash(&zip_path)? };
     let artifacts = project_root.join("artifacts");
     paths::reject_redirect(&artifacts)?;
     let temporary = tempfile::Builder::new().prefix(".register-").tempdir_in(&artifacts).map_err(|e| e.to_string())?;
@@ -115,7 +116,7 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
     let final_directory = artifacts.join(&version.version_id);
     let operation_id = uuid::Uuid::new_v4().to_string();
     let operation = serde_json::json!({"versionId":version.version_id,"taskId":task.context.task_id});
-    crate::storage::repository::file_operation(app,&operation_id,&project.mod_id,"register","pending",&operation)?;
+    crate::application::file_operations::file_operation(app,&operation_id,&project.mod_id,"register","pending",&operation)?;
     fs::rename(temporary.path(), &final_directory).map_err(|e| e.to_string())?;
     if let Err(error) = (||->Result<(),String>{
         app.state::<crate::pi::workspace::Workspaces>().validate_delivery(app,&task.context,&delivery.lease_id,delivery.source_revision)?;
@@ -124,15 +125,14 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
         if cancelled.is_some_and(|v|v.load(std::sync::atomic::Ordering::SeqCst)){return Err("交付工具已结束或取消，未登记版本".into());}
         let active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE task_id=?1 AND status='running')",[&task.context.task_id],|r|r.get(0)).map_err(|e|e.to_string())?;
         if !active{return Err("任务已停止，不能登记".into());}
-        let mut current=crate::storage::repository::read_on(&tx,&project.mod_id)?;
-        current.latest_version_id=Some(version.version_id.clone());current.versions.push(version.clone());current.development_status=DevelopmentStatus::Ready;current.updated_at=mods::now()?;
-        crate::storage::repository::save_on(&tx,&current,false)?;
+        let current=crate::storage::repository::read_on(&tx,&project.mod_id)?;
+        super::repository::register_on(&tx,&project.mod_id,current.revision,&version,&mods::now()?)?;
         super::delivery_metadata::ensure_anchor_on(&tx,&project.mod_id,&version)?;
         let mut metadata=super::delivery_metadata::read_on(&tx,&project.mod_id,&version.version_id)?;
-        metadata.context_snapshot_id=task.context.context_snapshot_id.clone();metadata.check_report=Some(report);metadata.cases=cases;
+        metadata.context_snapshot_id=Some(task.context.context_snapshot_id.clone());metadata.check_report=Some(report);metadata.cases=cases;
         super::delivery_metadata::save_on(&tx,&metadata)?;
         let mut registered_task=task.clone();registered_task.registered_version_id=Some(version.version_id.clone());
-        crate::storage::repository::task_on(&tx,&registered_task)?;
+        crate::pi::tasks::task_on(&tx,&registered_task)?;
         tx.commit().map_err(|e|e.to_string())
     })() {
         // 元数据失败时只清理本次新版本，保留所有既有版本。
@@ -140,7 +140,7 @@ pub fn register(app: &tauri::AppHandle, task: &mut TaskRecord, delivery: Deliver
         if actual.starts_with(artifacts.canonicalize().map_err(|e| e.to_string())?) { let _ = fs::remove_dir_all(actual); }
         return Err(error);
     }
-    crate::storage::repository::file_operation(app,&operation_id,&project.mod_id,"register","done",&operation)?;
+    crate::application::file_operations::file_operation(app,&operation_id,&project.mod_id,"register","done",&operation)?;
     task.registered_version_id = Some(version.version_id.clone());
     Ok(version)
 }
@@ -150,6 +150,17 @@ pub fn version_root(app: &tauri::AppHandle, mod_id: &str, version_id: &str) -> R
     let project = mods::read_project(app, mod_id)?;
     if !project.versions.iter().any(|v| v.version_id == version_id) { return Err("版本不属于所选项目".into()); }
     checked_path(&paths::project_dir(app, mod_id)?, &format!("artifacts/{version_id}"))
+}
+
+#[tauri::command]
+pub fn get_install_hint(app: tauri::AppHandle, storage: tauri::State<mods::StorageState>, mod_id: String, version_id: String) -> Result<super::models::InstallHint, String> {
+    let _lock = storage.0.lock().map_err(|_| "项目存储锁异常")?;
+    let manifest = manifest(&version_root(&app, &mod_id, &version_id)?)?;
+    let project = mods::read_project(&app, &mod_id)?;
+    let hint = crate::games::list(&app)?.into_iter()
+        .find(|game| game.id == project.game_id)
+        .and_then(|game| game.install_hint);
+    Ok(hint.unwrap_or(super::models::InstallHint { description: manifest.target_directory_hint, example_path: String::new() }))
 }
 
 /// 用户手动删除应用内的版本包；已部署文件、源码及安装历史保持不动。
@@ -167,17 +178,15 @@ pub fn delete_version(app: tauri::AppHandle, storage: tauri::State<mods::Storage
     project.updated_at = mods::now()?;
     let operation_id = uuid::Uuid::new_v4().to_string();
     let operation = serde_json::json!({"versionId":version_id,"tombstone":temporary.file_name().ok_or("删除目录无效")?.to_string_lossy()});
-    crate::storage::repository::file_operation(&app,&operation_id,&mod_id,"delete","pending",&operation)?;
+    crate::application::file_operations::file_operation(&app,&operation_id,&mod_id,"delete","pending",&operation)?;
     fs::rename(&root, &temporary).map_err(|e| e.to_string())?;
     super::delivery_metadata::ensure_anchor_on(&crate::storage::database::connect(&app)?,&mod_id,project.versions.iter().find(|v|v.version_id==version_id).ok_or("版本不存在")?)?;
-    project.versions.retain(|version| version.version_id != version_id);
-    if project.latest_version_id.as_deref() == Some(&version_id) { project.latest_version_id = project.versions.last().map(|version| version.version_id.clone()); }
-    if project.versions.is_empty() && matches!(project.development_status, DevelopmentStatus::Ready) { project.development_status = DevelopmentStatus::Generated; }
     if let Err(error) = (||->Result<(),String>{
-        let mut db=crate::storage::database::connect(&app)?;let tx=db.transaction().map_err(|e|e.to_string())?;
-        crate::storage::repository::save_on(&tx,&project,false)?;
+        let mut db=crate::storage::database::connect(&app)?;let tx=db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+        super::repository::delete_on(&tx,&mod_id,project.revision,&version_id,&project.updated_at)?;
         super::delivery_metadata::mark_deleted_on(&tx,&mod_id,&version_id,true)?;
-        tx.commit().map_err(|e|e.to_string())?;project.revision+=1;Ok(())
+        project=crate::storage::repository::read_on(&tx,&mod_id)?;
+        tx.commit().map_err(|e|e.to_string())?;Ok(())
     })() {
         fs::rename(&temporary, &root).map_err(|restore| format!("{error}；版本目录恢复失败：{restore}"))?;
         return Err(error);
@@ -185,6 +194,6 @@ pub fn delete_version(app: tauri::AppHandle, storage: tauri::State<mods::Storage
     let actual = temporary.canonicalize().map_err(|e| e.to_string())?;
     if actual.parent() != Some(artifacts.as_path()) { return Err("版本清理路径越界".into()); }
     fs::remove_dir_all(actual).map_err(|e| format!("版本记录已删除，残留目录清理失败：{e}"))?;
-    crate::storage::repository::file_operation(&app,&operation_id,&mod_id,"delete","done",&operation)?;
+    crate::application::file_operations::file_operation(&app,&operation_id,&mod_id,"delete","done",&operation)?;
     Ok(project)
 }

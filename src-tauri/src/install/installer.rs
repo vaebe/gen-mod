@@ -1,5 +1,5 @@
 use super::models::{InstallPreview, PreviewEntry};
-use crate::{artifacts::registry::{checked_path, manifest, version_root}, changes::{file_hash, relative_path}, storage::{mods, paths, models::{InstallationRecord, InstallationStatus, RollbackStatus, InstalledTarget, TargetState}}};
+use crate::{artifacts::registry::{checked_path, manifest, version_root}, changes::{file_hash, relative_path}, storage::{mods, paths}, install::models::{InstallationRecord, InstallationStatus, RollbackStatus}};
 use std::{collections::BTreeMap, fs, path::{Path, PathBuf}, sync::Mutex};
 
 /// 预览令牌只存在原生内存；执行时重新核对，不能凭前端伪造清单安装。
@@ -51,10 +51,7 @@ pub fn preview_install(app: tauri::AppHandle, storage: tauri::State<mods::Storag
     let _lock = storage.0.lock().map_err(|_| "项目存储锁异常")?;
     let preview = calculate(&app, &mod_id, &version_id, &target_directory)?;
     // 记录最近通过校验的选择，即使用户之后取消安装也可再次复用。
-    let mut project = mods::read_project(&app, &mod_id)?;
-    project.last_deployment_directory = Some(preview.target_directory.clone());
-    project.updated_at = mods::now()?;
-    crate::storage::repository::save(&app, &mut project)?;
+    super::repository::remember_directory(&app, &mod_id, &preview.target_directory)?;
     let mut previews = state.0.lock().map_err(|_| "安装预览锁异常")?;
     previews.clear(); // 单用户确认流程，旧预览失效。
     previews.insert(preview.preview_id.clone(), preview.clone());
@@ -68,9 +65,9 @@ pub fn install_version(app: tauri::AppHandle, storage: tauri::State<mods::Storag
     let preview = state.0.lock().map_err(|_| "安装预览锁异常")?.remove(&preview_id).ok_or("安装预览已失效，请重新预览")?;
     let current = calculate(&app, &preview.mod_id, &preview.version_id, &preview.target_directory)?;
     if serde_json::to_value(&current.entries).map_err(|e| e.to_string())? != serde_json::to_value(&preview.entries).map_err(|e| e.to_string())? { return Err("目标文件在预览后发生变化，请重新确认".into()); }
-    let mut record = InstallationRecord { installation_id: uuid::Uuid::new_v4().to_string(), version_id: preview.version_id.clone(), target_directory: preview.target_directory.clone(), attempted_at: mods::now()?, status: InstallationStatus::Failed, rollback: RollbackStatus::NotNeeded, backup_directory: None, error: None };
+    let mut record = InstallationRecord { installation_id: uuid::Uuid::new_v4().to_string(), version_id: preview.version_id.clone(), target_directory: preview.target_directory.clone(), attempted_at: mods::now()?, status: InstallationStatus::Failed, rollback: RollbackStatus::NotNeeded, error: None };
     let operation = serde_json::json!({"record":record});
-    crate::storage::repository::file_operation(&app,&record.installation_id,&preview.mod_id,"install","pending",&operation)?;
+    crate::application::file_operations::file_operation(&app,&record.installation_id,&preview.mod_id,"install","pending",&operation)?;
     let mut touched = false;
     let result = (|| -> Result<(), String> {
         for entry in &preview.entries {
@@ -89,19 +86,13 @@ pub fn install_version(app: tauri::AppHandle, storage: tauri::State<mods::Storag
         record.error = Some(error);
         if touched { record.rollback = RollbackStatus::NotAttempted; }
     } else { record.status = InstallationStatus::Succeeded; }
-    let saved = crate::storage::repository::update(&app,&preview.mod_id,|project| {
-        if matches!(record.status,InstallationStatus::Succeeded) || touched {
-            project.installed_targets.retain(|target|target.target_directory!=preview.target_directory);
-            project.installed_targets.push(InstalledTarget {target_directory:preview.target_directory.clone(),version_id:if matches!(record.status,InstallationStatus::Succeeded) {Some(preview.version_id.clone())} else {None},state:if matches!(record.status,InstallationStatus::Succeeded) {TargetState::Known} else {TargetState::Uncertain}});
-        }
-        project.installations.push(record.clone()); project.updated_at=mods::now()?; Ok(())
-    });
+    let saved = super::repository::record_attempt(&app,&preview.mod_id,&record,touched);
     if let Err(error) = saved {
         record.status=InstallationStatus::Failed; record.rollback=if touched {RollbackStatus::NotAttempted} else {RollbackStatus::NotNeeded};
         record.error=Some(format!("安装记录未提交：{error}；目标文件未回退"));
-        crate::storage::repository::file_operation(&app,&record.installation_id,&preview.mod_id,"install","pending",&serde_json::json!({"record":record}))?;
+        crate::application::file_operations::file_operation(&app,&record.installation_id,&preview.mod_id,"install","pending",&serde_json::json!({"record":record}))?;
         return Err(record.error.clone().unwrap_or_default());
     }
-    crate::storage::repository::file_operation(&app,&record.installation_id,&preview.mod_id,"install","done",&serde_json::json!({"record":record}))?;
+    crate::application::file_operations::file_operation(&app,&record.installation_id,&preview.mod_id,"install","done",&serde_json::json!({"record":record}))?;
     Ok(record)
 }

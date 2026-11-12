@@ -1,7 +1,7 @@
-import type { PiEnvelope, PiRecord, RuntimeSnapshot } from './types'
-import type { ModelSelection, SessionModelState } from '@/contracts/config'
+import type { ExtensionRequest, ExtensionResponse, PiEnvelope, PiRecord, RuntimeSnapshot } from './types'
 import type { ImageInput, ThinkingLevel } from '@/contracts/session'
 import type { TaskContext } from '@/contracts/task'
+import type { ModelSelection, SessionModelState } from '@/features/settings/types'
 import { Channel } from '@tauri-apps/api/core'
 import { shallowRef } from 'vue'
 import { nativeCall } from '@/services/native'
@@ -138,6 +138,16 @@ export function createPiClient() {
       connection.value = 'error'
       throw error
     }
+  }
+
+  function respondExtension(request: Readonly<ExtensionRequest>, response: ExtensionResponse): Promise<void> {
+    // UI response 不期待普通 RPC response，不能占据请求 pending 队列。
+    return nativeCall<void>('send_pi_command', {
+      modId: request.modId,
+      sessionId: request.sessionId,
+      generation: request.generation,
+      command: { ...response, type: 'extension_ui_response', id: request.id },
+    })
   }
 
   function request(type: string, fields: Record<string, unknown> = {}, timeoutMs = 30_000): Promise<PiRecord> {
@@ -353,5 +363,5 @@ export function createPiClient() {
       listeners.delete(listener)
     }
   }
-  return { connection, connectionError, synchronizing, lastSequence, synchronize, submissionState, active, generation, select, selectModel, connect, prompt, steer, request, disconnect, subscribe }
+  return { connection, connectionError, synchronizing, lastSequence, synchronize, submissionState, active, generation, select, selectModel, connect, prompt, steer, request, respondExtension, disconnect, subscribe }
 }

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import type { ModelSelection, ProviderConfiguration, SessionModelState } from '@/contracts/config'
+import type { DeepReadonly } from 'vue'
 import type { ThinkingLevel } from '@/contracts/session'
+import type { ModelSelection, ProviderConfiguration, SessionModelState } from '@/features/settings/types'
 import { Check, ChevronDown, RotateCcw, Zap } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
-const props = defineProps<{ providers: ProviderConfiguration[], modelState?: SessionModelState, thinkingLevel: ThinkingLevel, thinkingLevels: ThinkingLevel[], disabled: boolean, thinkingDisabled: boolean }>()
+const props = defineProps<{ providers: ProviderConfiguration[], modelState?: DeepReadonly<SessionModelState>, thinkingLevel: ThinkingLevel, thinkingLevels: readonly ThinkingLevel[], disabled: boolean, thinkingDisabled: boolean }>()
 const emit = defineEmits<{ select: [selection: ModelSelection], thinking: [level: ThinkingLevel] }>()
 const modelOpen = shallowRef(false)
 const thinkingOpen = shallowRef(false)

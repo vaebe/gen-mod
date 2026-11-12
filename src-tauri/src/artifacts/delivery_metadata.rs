@@ -1,6 +1,6 @@
+use super::models::ArtifactVersion;
 use super::content_check::ContentCheckReport;
 use crate::storage::{
-    models::ArtifactVersion,
     repository::{decode, encode},
 };
 use rusqlite::{params, Connection};
@@ -87,17 +87,6 @@ pub fn list_on(db: &Connection, id: &str) -> Result<Vec<DeliveryMetadata>, Strin
     rows.map(|r| decode(r.map_err(|e| e.to_string())?))
         .collect()
 }
-pub fn backfill(app: &tauri::AppHandle) -> Result<(), String> {
-    let mut db = crate::storage::database::connect(app)?;
-    let projects = crate::storage::repository::list(app)?;
-    let tx = db.transaction().map_err(|e| e.to_string())?;
-    for p in projects {
-        for v in p.versions {
-            ensure_anchor_on(&tx, &p.mod_id, &v)?;
-        }
-    }
-    tx.commit().map_err(|e| e.to_string())
-}
 pub fn validate_cases(cases: &[VerificationCase]) -> Result<(), String> {
     if cases.len() > 100 {
         return Err("验收条目过多".into());
@@ -137,12 +126,11 @@ mod tests {
     #[test]
     fn anchors_are_idempotent_and_survive_package_deletion() {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("PRAGMA foreign_keys=ON;CREATE TABLE projects(mod_id TEXT PRIMARY KEY);INSERT INTO projects VALUES('a'),('b');").unwrap();
-        db.execute_batch(include_str!(
-            "../storage/migrations/004_delivery_metadata.sql"
-        ))
-        .unwrap();
+        db.execute_batch(include_str!("../storage/schema.sql")).unwrap();
+        db.execute_batch("PRAGMA foreign_keys=ON;INSERT INTO projects(mod_id,payload) VALUES('a','{}'),('b','{}');").unwrap();
         let version = ArtifactVersion {
+            summary: "当前交付摘要".into(),
+            session_id: "s".into(),
             version_id: "v1".into(),
             task_id: "t1".into(),
             created_at: "now".into(),

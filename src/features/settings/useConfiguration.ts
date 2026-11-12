@@ -1,6 +1,6 @@
-import type { ConfigurationStatus, SaveConfiguration } from '@/contracts/config'
+import type { ConfigurationStatus, SaveConfiguration } from '@/features/settings/types'
 import { shallowRef } from 'vue'
-import { nativeCall } from '@/services/native'
+import { configurationService } from './service'
 
 // 读取脱敏状态；新输入的 Key 只通过保存请求传给原生层。
 export function useConfiguration() {
@@ -12,14 +12,14 @@ export function useConfiguration() {
     loading.value = true
     error.value = ''
     try {
-      status.value = await nativeCall<ConfigurationStatus>('get_configuration')
+      status.value = await configurationService.read()
     }
     catch (cause) { error.value = (cause as Error).message }
     finally { loading.value = false }
   }
   async function openDirectory(): Promise<void> {
     try {
-      await nativeCall('open_configuration_directory')
+      await configurationService.openDirectory()
     }
     catch (cause) { error.value = (cause as Error).message }
   }
@@ -30,7 +30,7 @@ export function useConfiguration() {
     saving.value = true
     error.value = ''
     try {
-      status.value = await nativeCall<ConfigurationStatus>('save_configuration', { configuration })
+      status.value = await configurationService.save(configuration)
       return true
     }
     catch (cause) {

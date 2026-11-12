@@ -1,5 +1,5 @@
 import { shallowRef, watch } from 'vue'
-import { modService } from '@/services/native'
+import { modService } from '@/features/projects/service'
 import { useProjectsStore } from '@/stores/projects'
 
 /** 保存串行化，离开前 flush；失败时保留输入并阻止切换。 */

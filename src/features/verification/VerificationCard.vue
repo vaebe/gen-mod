@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { FeedbackDraft, FeedbackPayload, VerificationRecord, VerificationResult } from '@/contracts/verification'
+import type { FeedbackDraft, FeedbackPayload, VerificationRecord, VerificationResult } from '@/features/verification/types'
 import { shallowRef, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { nativeCall } from '@/services/native'
+import { invalidateVerification } from './useVerification'
+import { verificationService } from './verificationService'
 
 const props = defineProps<{ draft: FeedbackDraft, records?: VerificationRecord[] }>()
 const emit = defineEmits<{ changed: [] }>()
@@ -53,10 +54,11 @@ function updateCase(index: number, value: unknown): void {
 async function act(action: 'save' | 'confirm' | 'reject'): Promise<void> {
   busy.value = true
   error.value = ''
+  const modId = props.draft.modId
   try {
     const args = { modId: props.draft.modId, draftId: props.draft.draftId, expectedRevision: revision.value }
     if (action === 'save') {
-      const saved = await nativeCall<FeedbackDraft>('edit_feedback_draft', { ...args, payload: payload.value })
+      const saved = await verificationService.edit({ ...args, payload: payload.value })
       payload.value = structuredClone(saved.payload)
       revision.value = saved.revision
     }
@@ -64,9 +66,10 @@ async function act(action: 'save' | 'confirm' | 'reject'): Promise<void> {
       if (JSON.stringify(payload.value) !== JSON.stringify(props.draft.payload)) {
         throw new Error('请先保存修改，查看最新草稿后再确认')
       }
-      await nativeCall('confirm_feedback_draft', { ...args, supersedes: supersedes.value === 'none' ? undefined : supersedes.value })
+      await verificationService.confirm({ ...args, supersedes: supersedes.value === 'none' ? undefined : supersedes.value })
     }
-    else { await nativeCall('reject_feedback_draft', args) }
+    else { await verificationService.reject(args) }
+    invalidateVerification(modId)
     emit('changed')
   }
   catch (cause) { error.value = (cause as Error).message }

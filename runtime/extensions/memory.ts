@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { context } from "./commands.js";
+import { context } from "./task-context.js";
 
 interface MemoryBootstrap {
   modId: string; taskId: string; snapshotId: string; revision: number;

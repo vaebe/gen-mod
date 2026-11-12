@@ -9,7 +9,8 @@
       "cover": "images/duckov/cover.jpg",
       "sortOrder": 0,
       "supportStatus": "supported",
-      "icon": "images/duckov/icon.jpg"
+      "icon": "images/duckov/icon.jpg",
+      "installHint": { "description": "请选择游戏的 Duckov_Data/Mods 目录。", "examplePath": "游戏安装目录/Duckov_Data/Mods" }
     },
     {
       "id": "stardew-valley",
@@ -19,7 +20,8 @@
       "cover": "images/stardew-valley/cover.jpg",
       "sortOrder": 1,
       "supportStatus": "supported",
-      "icon": "images/stardew-valley/icon.jpg"
+      "icon": "images/stardew-valley/icon.jpg",
+      "installHint": { "description": "请选择游戏的 Mods 目录。", "examplePath": "游戏安装目录/Mods" }
     },
     {
       "id": "rimworld",

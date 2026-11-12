@@ -209,9 +209,7 @@ pub async fn cloud_confirm_updates(
         let _storage = storage.0.lock().map_err(|_| "项目存储锁异常")?;
         apply_on(&official::root(&worker_app)?, &catalog, &game_ids, packages)?;
         for project in crate::storage::repository::list(&worker_app)? {
-            crate::storage::repository::update(&worker_app, &project.mod_id, |project| {
-                crate::skills::registry::refresh_sessions(&worker_app, project)
-            })?;
+            crate::pi::session_repository::refresh_skills(&worker_app, &project.mod_id)?;
         }
         Ok(())
     })

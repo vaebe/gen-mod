@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, cpSync, readdirSync, statSync, realpathSync, lstatSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isAbsolute, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
+import { checkRuntimeDeclarations, checkPreparedRuntime } from "./runtime-contract.mjs";
+import { copyRuntimeAssets } from "./copy-runtime-assets.mjs";
 import { materialize } from "./materialize-runtime.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const lock = JSON.parse(readFileSync(join(root, "runtime/runtime-lock.json"), "utf8"));
+const lock = checkRuntimeDeclarations(root);
 const resources = join(root, "runtime/resources");
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
@@ -73,23 +75,9 @@ if (!existsSync(portableMarker) || readFileSync(portableMarker, "utf8") !== port
   writeFileSync(portableMarker, portableRevision);
   console.log(`复制 ${count} 个运行时依赖目录（不含页面依赖闭包）`);
 }
-// Tauri 按资源修改时间触发 Rust 重建，内容相同时避免重新复制。
-const runtimeCopyOptions = {
-  recursive: true,
-  filter: (source, destination) => statSync(source).isDirectory() || !existsSync(destination) || !readFileSync(source).equals(readFileSync(destination)),
-};
-if (existsSync(join(root, "runtime/extensions"))) {
-  // cpSync 不移除旧文件；只清理本轮明确退役的两个分发文件。
-  for (const name of ["extensions/assets.ts", "helpers/process-image.ps1"]) {
-    const target = join(portable, name);
-    if (!existsSync(target)) { continue; }
-    const relation = relative(realpathSync(portable), realpathSync(target));
-    if (isAbsolute(relation) || relation.startsWith("..") || lstatSync(target).isSymbolicLink() || !lstatSync(target).isFile()) { throw new Error("退役资源路径异常，未删除"); }
-    unlinkSync(target);
-  }
-  cpSync(join(root, "runtime/extensions"), join(portable, "extensions"), runtimeCopyOptions);
-}
-cpSync(join(root, "runtime/helpers"), join(portable, "helpers"), runtimeCopyOptions);
+copyRuntimeAssets(root, portable);
+
+checkPreparedRuntime(resources, lock);
 
 // 记录可审计的资源哈希，发布前检查完整性；不复制项目 env 或用户资料。
 const files = [];

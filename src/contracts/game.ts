@@ -1,4 +1,7 @@
+import type { InstallHint } from './install'
+
 export interface Game {
+  installHint?: InstallHint
   id: string
   steamAppId: number
   name: string

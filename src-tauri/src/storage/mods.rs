@@ -59,7 +59,7 @@ pub fn create_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, name
         for child in ["source", "artifacts", "logs"] {
             fs::create_dir(directory.join(child)).map_err(|e| e.to_string())?;
         }
-        super::repository::create(&app, &project)
+        crate::projects::repository::create(&app, &project)
     })();
     if let Err(error) = result {
         // 仅清理由本次调用创建的 UUID 目录，不触碰已有项目。
@@ -87,30 +87,26 @@ pub fn get_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, mod_id:
 }
 
 #[tauri::command]
+pub fn update_mod_description(app: tauri::AppHandle, state: tauri::State<StorageState>, mod_id: String, description: String, expected_description: String) -> Result<ModProject, String> {
+    let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
+    crate::projects::repository::edit(&app, &mod_id, crate::projects::repository::DetailChange::Description { value: description, expected: expected_description })
+}
+
+#[tauri::command]
 pub fn rename_mod(app: tauri::AppHandle, state: tauri::State<StorageState>, mod_id: String, name: String) -> Result<ModProject, String> {
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
     let name=validate_name(&name)?;
-    super::repository::update(&app,&mod_id,|project| {project.name=name;project.updated_at=now()?;Ok(())})
+    crate::projects::repository::edit(&app, &mod_id, crate::projects::repository::DetailChange::Name(name))
 }
 
 #[tauri::command]
 pub fn save_mod_draft(app: tauri::AppHandle, state: tauri::State<StorageState>, mod_id: String, session_id: Option<String>, requirement: String, expected_requirement: Option<String>) -> Result<ModProject, String> {
     let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
     crate::project_lifecycle::repository::ensure_writable(&app,&mod_id)?;
-    let mut project = read_project(&app, &mod_id)?;
+    let project = read_project(&app, &mod_id)?;
     if let Some(id) = session_id {
-        if let Some(expected) = expected_requirement {
-            // 发送期间可能切换并编辑草稿，只清理仍与已发送内容一致的原会话。
-            let db = super::database::connect(&app)?;
-            db.execute("UPDATE sessions SET draft=?3 WHERE mod_id=?1 AND session_id=?2 AND deleted=0 AND draft=?4",rusqlite::params![mod_id,id,requirement,expected]).map_err(|e|e.to_string())?;
-        } else {
-            super::repository::save_preferences(&app,&mod_id,&id,Some(&requirement),None)?;
-        }
+        crate::pi::session_repository::save_draft_on(&mut super::database::connect(&app)?,&mod_id,&id,&requirement,expected_requirement.as_deref())?;
         return Ok(project);
     }
-    if !project.sessions.is_empty() { return Err("保存草稿必须指定会话".into()); }
-    project.draft_requirement = requirement;
-    project.updated_at = now()?;
-    crate::storage::repository::save(&app, &mut project)?;
-    Ok(project)
+    crate::projects::repository::edit_on(&mut super::database::connect(&app)?, &mod_id, project.revision, crate::projects::repository::DetailChange::InitialDraft(requirement))
 }

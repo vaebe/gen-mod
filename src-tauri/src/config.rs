@@ -206,7 +206,7 @@ pub fn read_for(app: &tauri::AppHandle, selection: &ModelSelection) -> Result<Mo
 }
 
 pub fn read_session(app: &tauri::AppHandle, mod_id: &str, session_id: &str) -> Result<ModelConfig, String> {
-    let (selection, preferred) = crate::storage::repository::model_preferences(app, mod_id, session_id)?;
+    let (selection, preferred) = crate::pi::session_repository::model_preferences(app, mod_id, session_id)?;
     let state = session_model_state(app, selection, &preferred);
     if !state.error.is_empty() { return Err(state.error); }
     read_for(app, &state.selection)

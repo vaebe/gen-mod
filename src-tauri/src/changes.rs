@@ -154,7 +154,7 @@ pub fn refresh(app: &tauri::AppHandle, context: &TaskContext) -> Result<(), Stri
 fn context(app: &tauri::AppHandle, mod_id: &str, task_id: &str) -> Result<TaskContext, String> {
     paths::validate_id(task_id)?;
     mods::read_project(app, mod_id)?;
-    let task = crate::storage::repository::task(app, mod_id, task_id)?;
+    let task = crate::pi::tasks::task(app, mod_id, task_id)?;
     if task.context.mod_id != mod_id || task.context.task_id != task_id { return Err("任务不属于当前项目".into()); }
     Ok(task.context)
 }

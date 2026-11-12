@@ -61,12 +61,10 @@ mod tests {
         use serde_json::json;
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.pragma_update(None, "foreign_keys", true).unwrap();
-        db.execute_batch(include_str!("../storage/migrations/001_initial.sql")).unwrap();
-        db.execute_batch(include_str!("../storage/migrations/011_submission_requests.sql")).unwrap();
-        db.execute("INSERT INTO projects VALUES('p','{}',0)", []).unwrap();
+        db.execute_batch(include_str!("../storage/schema.sql")).unwrap();
+        db.execute("INSERT INTO projects(mod_id,payload,revision) VALUES('p','{}',0)", []).unwrap();
         db.execute("INSERT INTO sessions(mod_id,session_id,payload) VALUES('p','s','{}')", []).unwrap();
-        db.execute("INSERT INTO submission_requests VALUES('r','p','s','accepted','task',NULL)", []).unwrap();
-        db.execute_batch(include_str!("../storage/migrations/012_submission_messages.sql")).unwrap();
+        db.execute("INSERT INTO submission_requests(request_id,mod_id,session_id,status,task_id,error) VALUES('r','p','s','accepted','task',NULL)", []).unwrap();
         let message = json!({"role":"user","timestamp":100,"content":"继续"});
         let fingerprint = crate::pi::bridge::input_fingerprint(&message, None).unwrap();
         db.execute("UPDATE submission_requests SET message_timestamp=100,message_fingerprint=?1", [&fingerprint]).unwrap();
@@ -84,11 +82,10 @@ mod tests {
     fn removing_session_cascades_accepted_and_rejected_submissions() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.pragma_update(None, "foreign_keys", true).unwrap();
-        db.execute_batch(include_str!("../storage/migrations/001_initial.sql")).unwrap();
-        db.execute_batch(include_str!("../storage/migrations/011_submission_requests.sql")).unwrap();
-        db.execute("INSERT INTO projects VALUES('p','{}',0)", []).unwrap();
+        db.execute_batch(include_str!("../storage/schema.sql")).unwrap();
+        db.execute("INSERT INTO projects(mod_id,payload,revision) VALUES('p','{}',0)", []).unwrap();
         db.execute("INSERT INTO sessions(mod_id,session_id,payload) VALUES('p','s','{}')", []).unwrap();
-        db.execute("INSERT INTO submission_requests VALUES('a','p','s','accepted','t',NULL),('b','p','s','rejected',NULL,'busy')", []).unwrap();
+        db.execute("INSERT INTO submission_requests(request_id,mod_id,session_id,status,task_id,error) VALUES('a','p','s','accepted','t',NULL),('b','p','s','rejected',NULL,'busy')", []).unwrap();
         db.execute("DELETE FROM sessions WHERE mod_id='p'", []).unwrap();
         let count: i64 = db.query_row("SELECT COUNT(*) FROM submission_requests", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 0);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { VerificationRecord } from '@/contracts/verification'
+import type { VerificationRecord } from '@/features/verification/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 

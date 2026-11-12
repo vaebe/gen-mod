@@ -6,8 +6,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { nativeCall } from '@/services/native'
-import { useSessionStore } from '@/stores/session'
+import { useSessionStore } from '@/features/sessions/useSessionStore'
+import { skillsService } from '@/features/skills/service'
 import SkillDetails from './SkillDetails.vue'
 
 const SkillContentDialog = defineAsyncComponent(() => import('./SkillContentDialog.vue'))
@@ -21,7 +21,7 @@ const metadata = shallowRef('{"name":"my-local-skill","description":"本机导�
 const session = useSessionStore()
 async function refresh(): Promise<void> {
   try {
-    skills.value = await nativeCall<SkillView[]>('list_skills')
+    skills.value = await skillsService.list()
   }
   catch (cause) { error.value = (cause as Error).message }
 }
@@ -33,7 +33,7 @@ async function toggle(skill: SkillView, enabled: boolean): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    await nativeCall('set_skill_enabled', { name: skill.name, enabled })
+    await skillsService.setEnabled(skill.name, enabled)
     await refresh()
   }
   catch (cause) { error.value = (cause as Error).message }
@@ -44,7 +44,7 @@ async function chooseDirectory(): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    const selected = await nativeCall<string | null>('pick_directory')
+    const selected = await skillsService.pickDirectory()
     if (selected) {
       directory.value = selected
     }
@@ -65,7 +65,7 @@ async function importLocal(): Promise<void> {
   error.value = ''
   try {
     const definition = JSON.parse(metadata.value) as SkillDefinition
-    await nativeCall('import_skill', { directory: directory.value, definition })
+    await skillsService.importLocal(directory.value, definition)
     directory.value = ''
     await refresh()
   }

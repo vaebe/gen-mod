@@ -52,7 +52,7 @@ pub fn get_long_term_memory(app: tauri::AppHandle, note_id: String) -> Result<Kn
 #[tauri::command]
 pub fn list_long_term_memories(app: tauri::AppHandle, query: Option<MemoryListQuery>, status: Option<String>, page: usize, page_size: usize) -> Result<MemoryPage, String> {
     if page == 0 || !(1..=50).contains(&page_size) { return Err("页码从 1 开始，每页 1–50 条".into()); }
-    if status.as_ref().is_some_and(|v| !matches!(v.as_str(), "active" | "candidate" | "archived")) { return Err("记忆状态筛选无效".into()); }
+    if status.as_ref().is_some_and(|v| !matches!(v.as_str(), "active" | "archived")) { return Err("记忆状态筛选无效".into()); }
     let offset = (page - 1).checked_mul(page_size).and_then(|value| i64::try_from(value).ok()).ok_or("页码无效")?;
     let db = database::connect(&app)?;
     let query = query.unwrap_or_default();
@@ -76,7 +76,7 @@ pub fn save_long_term_memory_entry(app: tauri::AppHandle, note_id: Option<String
     let note_id = uuid::Uuid::new_v4().to_string();
     let now = crate::storage::mods::now()?;
     let note = KnowledgeNote { note_id: note_id.clone(), revision: 1, game_id: input.game_id, status: "active".into(), allow_reuse: true,
-        origin_mod_id: None, origin_project_name: None, user_edited: true, memory_key: format!("manual:{note_id}"), created_at: Some(now.clone()), updated_at: Some(now),
+        origin_mod_id: None, origin_project_name: None, user_edited: true, memory_key: format!("manual:{note_id}"), created_at: now.clone(), updated_at: now,
         input: KnowledgeInput { title: input.title, content: input.content, version_scope: input.version_scope, game_version: input.game_version,
             route: "manual".into(), evidence_kind: "manual".into(), source_refs: vec![SourceRef { kind: "manual".into(), id: note_id, ..Default::default() }] } };
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;

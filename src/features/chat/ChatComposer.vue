@@ -1,18 +1,23 @@
 <script setup lang="ts">
-import type { ModelSelection, ProviderConfiguration, SessionModelState } from '@/contracts/config'
+import type { DeepReadonly } from 'vue'
 import type { ContextUsage, PromptAttachment, ThinkingLevel } from '@/contracts/session'
+import type { ModelSelection, ProviderConfiguration, SessionModelState } from '@/features/settings/types'
 import { ArrowUp, FileText, Paperclip, Plus, Shrink, Square, X } from '@lucide/vue'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
+import { useSessionStore } from '@/features/sessions/useSessionStore'
+import { removeSourceReference, sourceReferences } from '@/features/workspace/sourceWorkspace'
 import ChatImage from './ChatImage.vue'
 import ContextUsageIndicator from './ContextUsageIndicator.vue'
 import ModelSelector from './ModelSelector.vue'
 
-const props = defineProps<{ attachments: PromptAttachment[], restoring?: boolean, readingAttachments: boolean, working: boolean, canQueue: boolean, stopping: boolean, busy: boolean, configured: boolean, providers: ProviderConfiguration[], modelState?: SessionModelState, error: string, thinkingLevel: ThinkingLevel, thinkingLevels: ThinkingLevel[], contextUsage?: ContextUsage, compacting: boolean, canCompact: boolean }>()
+const props = defineProps<{ attachments: readonly PromptAttachment[], restoring?: boolean, readingAttachments: boolean, working: boolean, canQueue: boolean, stopping: boolean, busy: boolean, configured: boolean, providers: ProviderConfiguration[], modelState?: DeepReadonly<SessionModelState>, error: string, thinkingLevel: ThinkingLevel, thinkingLevels: readonly ThinkingLevel[], contextUsage?: ContextUsage, compacting: boolean, canCompact: boolean }>()
 const emit = defineEmits<{ send: [], cancel: [], save: [], model: [selection: ModelSelection], thinking: [level: ThinkingLevel], compact: [], files: [files: File[]], removeAttachment: [id: string] }>()
 const requirement = defineModel<string>({ required: true })
+const session = useSessionStore()
+const references = computed(() => sourceReferences.value[session.modId] ?? [])
 const picker = useTemplateRef<HTMLInputElement>('picker')
 const menuOpen = shallowRef(false)
 const slashMenu = shallowRef(false)
@@ -24,7 +29,7 @@ const actions = computed(() => [
   { id: 'compact', label: '压缩', command: '/compact', description: props.busy ? '会话空闲时可使用' : `压缩此聊天的上下文${contextPercent.value !== undefined ? `（已使用 ${contextPercent.value}%）` : ''}`, icon: Shrink, disabled: props.busy || !props.configured || !props.canCompact },
 ].filter(action => !slashMenu.value || `${action.label} ${action.command}`.toLowerCase().includes(slash.value?.[1]?.toLowerCase() ?? '')))
 const imageError = computed(() => props.attachments.some(file => file.type === 'image') && props.modelState?.definition && !props.modelState.definition.input.includes('image') ? '当前模型不支持图片，请移除图片附件或切换模型' : '')
-const canSend = computed(() => !props.restoring && (!props.busy || props.canQueue) && !props.readingAttachments && props.configured && !imageError.value && (requirement.value.trim() || props.attachments.length))
+const canSend = computed(() => !props.restoring && (!props.busy || props.canQueue) && !props.readingAttachments && props.configured && !imageError.value && (requirement.value.trim() || props.attachments.length || references.value.length))
 watch(requirement, () => {
   if (slash.value) {
     slashMenu.value = true
@@ -103,7 +108,12 @@ function pasteFiles(event: ClipboardEvent): void {
   <div class="shrink-0 px-4 pt-3 pb-5 lg:px-8">
     <Popover v-model:open="menuOpen">
       <PopoverAnchor as-child>
-        <div class="studio-composer mx-auto max-w-3xl rounded-xl border bg-card p-4">
+        <div :data-source-chat="session.modId" class="studio-composer mx-auto max-w-3xl rounded-xl border bg-card p-4">
+          <div v-if="references.length" class="mb-3 flex flex-wrap gap-2">
+            <Button v-for="reference in references" :key="reference.path" variant="outline" size="sm" :class="reference.invalid && 'text-destructive'" :title="reference.path" :aria-label="`移除文件引用 ${reference.path}`" @click="removeSourceReference(session.modId, reference.path)">
+              <FileText /><span class="max-w-48 truncate">{{ reference.invalid ? '已失效：' : '' }}{{ reference.path }}</span><X />
+            </Button>
+          </div>
           <input ref="picker" type="file" multiple class="hidden" :disabled="restoring" @change="chooseFiles">
           <div v-if="attachments.length" class="mb-3 flex flex-wrap gap-2">
             <div v-for="file in attachments" :key="file.id" class="relative flex max-w-56 items-center text-xs" :class="file.type === 'image' ? 'shrink-0' : 'gap-2 rounded-lg border bg-muted/30 p-1.5'">
@@ -126,7 +136,7 @@ function pasteFiles(event: ClipboardEvent): void {
             <Button v-if="working || compacting" size="icon" class="size-8 rounded-full" :disabled="stopping" aria-label="停止会话" title="停止会话" @click="$emit('cancel')">
               <Square class="size-3.5 fill-current" />
             </Button>
-            <Button v-if="!(working || compacting) || (working && attachments.length + requirement.trim().length > 0)" size="icon" class="size-8 rounded-full" :disabled="!canSend || !!slash" :aria-label="working ? '加入队列' : '发送提示词'" :title="working ? '加入队列（Enter）' : '发送（Enter）'" @click="$emit('send')">
+            <Button v-if="!(working || compacting) || (working && attachments.length + requirement.trim().length + references.length > 0)" size="icon" class="size-8 rounded-full" :disabled="!canSend || !!slash" :aria-label="working ? '加入队列' : '发送提示词'" :title="working ? '加入队列（Enter）' : '发送（Enter）'" @click="$emit('send')">
               <ArrowUp class="size-4" />
             </Button>
           </div>

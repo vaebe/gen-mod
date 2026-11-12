@@ -1,12 +1,13 @@
 <script setup lang="ts">
+import type { DeepReadonly } from 'vue'
 import type { ChatMessage, ToolRun } from '@/contracts/session'
 import MarkdownRender, { disableKatex, disableMermaid } from 'markstream-vue'
 import { shallowRef } from 'vue'
-import { nativeCall } from '@/services/native'
+import { chatService } from '@/features/chat/service'
 import ToolActivity from './ToolActivity.vue'
 import 'markstream-vue/index.css'
 
-defineProps<{ message: ChatMessage, tools: Record<string, ToolRun>, modId: string }>()
+defineProps<{ message: DeepReadonly<ChatMessage>, tools: Record<string, DeepReadonly<ToolRun>>, modId: string }>()
 const linkError = shallowRef('')
 disableMermaid()
 disableKatex()
@@ -25,7 +26,7 @@ async function interceptLink(event: MouseEvent, modId: string): Promise<void> {
   event.stopPropagation()
   linkError.value = ''
   try {
-    await nativeCall('open_message_link', { modId, link: anchor.getAttribute('href') || '' })
+    await chatService.openMessageLink({ modId, link: anchor.getAttribute('href') || '' })
   }
   catch (cause) { linkError.value = (cause as Error).message }
 }

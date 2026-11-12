@@ -42,7 +42,8 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "installer=build-output/$($config.productName)_${version}_x64-setup.exe" >> $env:GITHUB_OUTPUT
 
-      - name: Set up Node.js
+      # CI 宿主 Node 只运行 pnpm/Vite/Tauri；内置 Node 由 runtime-lock.json 下载、校验及分发。
+      - name: Set up host Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 26.12.1

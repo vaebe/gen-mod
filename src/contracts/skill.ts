@@ -24,3 +24,8 @@ export interface SkillView extends SkillDefinition {
   scripts: string[]
   error?: string | null
 }
+
+export interface SkillUpdates {
+  newGames: { id: string, name: string }[]
+  versions: { skillId: string, name: string, version: string, fileId: string }[]
+}

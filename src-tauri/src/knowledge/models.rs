@@ -36,14 +36,10 @@ pub struct KnowledgeNote {
     pub origin_mod_id: Option<String>,
     #[serde(default)]
     pub origin_project_name: Option<String>,
-    #[serde(default)]
     pub user_edited: bool,
-    #[serde(default)]
     pub memory_key: String,
-    #[serde(default)]
-    pub created_at: Option<String>,
-    #[serde(default)]
-    pub updated_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 #[derive(Serialize)]
 pub struct KnowledgeReference {

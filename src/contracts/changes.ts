@@ -13,3 +13,12 @@ export interface FileDiff {
   after: string | null
   lines: { kind: 'equal' | 'insert' | 'delete', text: string }[]
 }
+
+/** 持久化任务文件操作记录中用于变更视图的字段。 */
+export interface TaskFileOperation {
+  toolCallId: string
+  operation: string
+  path?: string
+  sourceRevision: number
+  fileChanges?: { path: string }[]
+}

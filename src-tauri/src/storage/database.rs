@@ -25,61 +25,64 @@ pub fn initialize(app: &tauri::AppHandle) -> Result<(), String> {
     let path = root.join("gen-mod.sqlite3");
     let mut connection = open(&path)?;
     if rusqlite::version_number() < 3_051_003 { return Err("内置 SQLite 缺少 WAL 修复，不能启用元数据写入".into()); }
+    initialize_schema(&mut connection)?;
     let mode: String = connection.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0)).map_err(|e| e.to_string())?;
     if mode.to_lowercase() != "wal" { return Err("SQLite 未能启用 WAL".into()); }
-    let exists: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='schema_migrations')", [], |r| r.get(0)).map_err(|e| e.to_string())?;
-    if !exists {
-        let tx = connection.transaction().map_err(|e| e.to_string())?;
-        tx.execute_batch(include_str!("migrations/001_initial.sql")).map_err(|e| e.to_string())?;
-        tx.execute("INSERT INTO schema_migrations VALUES(1,?1)", [super::mods::now()?]).map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-    }
-    let model_migration: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=2)", [], |r| r.get(0)).map_err(|e| e.to_string())?;
-    if !model_migration {
-        let tx = connection.transaction().map_err(|e| e.to_string())?;
-        tx.execute_batch(include_str!("migrations/002_session_model.sql")).map_err(|e| e.to_string())?;
-        tx.execute("INSERT INTO schema_migrations VALUES(2,?1)", [super::mods::now()?]).map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-    }
-    for (version,sql) in [(3, include_str!("migrations/003_project_context.sql")),(4,include_str!("migrations/004_delivery_metadata.sql")),(5,include_str!("migrations/005_verification.sql")),(6,include_str!("migrations/006_knowledge.sql")),(7,include_str!("migrations/007_inspection.sql")),(8,include_str!("migrations/008_assets.sql")),(9,include_str!("migrations/009_memory.sql")),(10,include_str!("migrations/010_project_lifecycle.sql")),(11,include_str!("migrations/011_submission_requests.sql")),(12,include_str!("migrations/012_submission_messages.sql"))] {
-        let applied:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=?1)",[version],|r|r.get(0)).map_err(|e|e.to_string())?;
-        if !applied {
-            let tx=connection.transaction().map_err(|e|e.to_string())?;
-            if version==9 { crate::knowledge::repository::migrate_memory_on(&tx)?; }
-            else { tx.execute_batch(sql).map_err(|e|e.to_string())?; }
-            tx.execute("INSERT INTO schema_migrations VALUES(?1,?2)",rusqlite::params![version,super::mods::now()?]).map_err(|e|e.to_string())?;
-            tx.commit().map_err(|e|e.to_string())?;
-        }
-    }
     app.manage(Database(path));
-    crate::project_lifecycle::recovery::recover_pending(app)?;
-    super::migration::import(app)?;
-    crate::project_context::repository::backfill(app)?;
-    crate::artifacts::delivery_metadata::backfill(app)?;
-    super::repository::interrupt_previous(app)?;
-    connect(app)?.execute("UPDATE submission_requests SET status='rejected',error='应用已重启，提交未启动' WHERE status='pending' AND task_id IS NULL",[]).map_err(|e|e.to_string())?;
-    super::repository::reconcile_files(app)
+    Ok(())
+}
+
+// 仅初始化当前结构；非空旧库不迁移，也不自动清空。
+fn initialize_schema(connection: &mut Connection) -> Result<(), String> {
+    let tx = connection.transaction().map_err(|e| e.to_string())?;
+    let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0)).map_err(|e| e.to_string())?;
+    let legacy: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='schema_migrations')", [], |row| row.get(0)).map_err(|e| e.to_string())?;
+    if legacy { return Err("不支持旧开发数据库，请使用独立数据目录；原数据未迁移或删除".into()); }
+    match version {
+        0 => {
+            let nonempty: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name NOT GLOB 'sqlite_*')", [], |row| row.get(0)).map_err(|e| e.to_string())?;
+            if nonempty { return Err("不支持旧开发数据库或未知结构；原数据未迁移或删除".into()); }
+            tx.execute_batch(include_str!("schema.sql")).map_err(|e| e.to_string())?;
+            tx.pragma_update(None, "user_version", 1).map_err(|e| e.to_string())?;
+        }
+        1 => {},
+        _ => return Err(format!("不支持数据库结构版本：{version}")),
+    }
+    tx.commit().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn memory_migration_backfill_failure_restores_original_schema_and_rows() {
-        let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch(include_str!("migrations/001_initial.sql")).unwrap();
-        db.execute_batch(include_str!("migrations/006_knowledge.sql")).unwrap();
-        db.execute("INSERT INTO projects VALUES('p','{}',0)", []).unwrap();
-        db.execute("INSERT INTO knowledge_notes VALUES('n','p','duckov',1,'active','{}')", []).unwrap();
-        {
-            let tx = db.transaction().unwrap();
-            assert!(crate::knowledge::repository::migrate_memory_on(&tx).is_err());
+    fn current_schema_initializes_once_and_preserves_rows() {
+        let mut db = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut db).unwrap();
+        db.execute("INSERT INTO projects(mod_id,payload) VALUES('p','{}')", []).unwrap();
+        initialize_schema(&mut db).unwrap();
+        assert_eq!(db.query_row::<i64, _, _>("SELECT COUNT(*) FROM projects", [], |row| row.get(0)).unwrap(), 1);
+        assert_eq!(db.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0)).unwrap(), 1);
+        assert_eq!(db.query_row::<i64, _, _>("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'", [], |row| row.get(0)).unwrap(), 18);
+        assert_eq!(db.query_row::<i64, _, _>("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('legacy_imports','project_assets','context_proposals','schema_migrations')", [], |row| row.get(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn unsupported_databases_are_rejected_without_changes() {
+        for (schema, version) in [
+            ("CREATE TABLE schema_migrations(version INTEGER); INSERT INTO schema_migrations VALUES(12);", 0),
+            ("CREATE TABLE unknown(value TEXT); INSERT INTO unknown VALUES('keep');", 0),
+            ("CREATE TABLE unknown(value TEXT); INSERT INTO unknown VALUES('keep');", 2),
+        ] {
+            let mut db = Connection::open_in_memory().unwrap();
+            db.execute_batch(schema).unwrap();
+            db.pragma_update(None, "user_version", version).unwrap();
+            let before: String = db.query_row("SELECT group_concat(sql) FROM sqlite_master", [], |row| row.get(0)).unwrap();
+            let changes = db.total_changes();
+            assert!(initialize_schema(&mut db).is_err());
+            assert_eq!(db.query_row::<String, _, _>("SELECT group_concat(sql) FROM sqlite_master", [], |row| row.get(0)).unwrap(), before);
+            assert_eq!(db.total_changes(), changes);
+            assert_eq!(db.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0)).unwrap(), version);
         }
-        let (owner, count): (String, i64) = db.query_row("SELECT mod_id,COUNT(*) FROM knowledge_notes", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
-        assert_eq!(owner, "p");
-        assert_eq!(count, 1);
-        let extra_tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('knowledge_notes_next','memory_content_links','task_memory_uses')", [], |row| row.get(0)).unwrap();
-        assert_eq!(extra_tables, 0);
-        let applied: i64 = db.query_row("SELECT COUNT(*) FROM schema_migrations WHERE version=9", [], |row| row.get(0)).unwrap();
-        assert_eq!(applied, 0);
     }
 }

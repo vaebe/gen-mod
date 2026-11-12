@@ -17,6 +17,8 @@ pub struct Game {
     pub icon: String,
     pub sort_order: u32,
     pub support_status: SupportStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_hint: Option<crate::artifacts::models::InstallHint>,
 }
 
 #[derive(Deserialize)]
@@ -91,4 +93,17 @@ fn read_game_image(app: &tauri::AppHandle, game_id: &str, icon: bool) -> Result<
         return Err("游戏图片不是有效的 JPEG 文件或超过 2 MiB".into());
     }
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn catalog_keeps_supported_game_installation_guidance() {
+        let games = super::read_on(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../resources/games")).unwrap();
+        let duckov = serde_json::to_value(games.iter().find(|g| g.id == "duckov").unwrap()).unwrap();
+        assert_eq!(duckov["installHint"]["examplePath"], "游戏安装目录/Duckov_Data/Mods");
+        let stardew = serde_json::to_value(games.iter().find(|g| g.id == "stardew-valley").unwrap()).unwrap();
+        assert_eq!(stardew["installHint"]["description"], "请选择游戏的 Mods 目录。");
+        assert_eq!(games.iter().filter(|g| matches!(g.support_status, super::SupportStatus::Supported)).count(), 2);
+    }
 }

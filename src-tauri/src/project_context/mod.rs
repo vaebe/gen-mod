@@ -71,9 +71,6 @@ pub fn check_task_references(
     app: &tauri::AppHandle,
     task: &crate::pi::tasks::TaskContext,
 ) -> Result<(), String> {
-    if task.context_snapshot_id.is_none() {
-        return Ok(());
-    }
     let original =
         repository::snapshot_for_task_on(&database::connect(app)?, &task.mod_id, &task.task_id)?
             .context;

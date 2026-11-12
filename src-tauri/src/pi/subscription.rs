@@ -1,4 +1,9 @@
-use super::bridge::Envelope;
+use serde::Serialize;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Envelope { pub(super) sequence: u64, pub(super) subscription: u64, pub(super) mod_id: String, pub(super) session_id: String, pub(super) task_id: Option<String>, pub(super) generation: u64, pub(super) kind: String, pub(super) record: Value }
+
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::{Arc, Mutex}};
 use tauri::ipc::Channel;

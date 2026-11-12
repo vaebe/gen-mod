@@ -106,7 +106,7 @@ pub fn apply_inspection(
                 id: uuid::Uuid::new_v4().to_string(),
                 directory: root,
                 files,
-                source_report_id: Some(report_id.clone()),
+                source_report_id: report_id.clone(),
             });
     }
     let original = context.reference_sets.clone();

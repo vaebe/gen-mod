@@ -1,26 +1,12 @@
+import { context } from "./task-context.js";
+import { redact, redactionKeys, runtimeDiagnostic } from "./diagnostics.js";
 import type { Lease } from "./workspace.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, mkdir, open, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export interface TaskContext { contextSnapshotId?: string; memoryBootstrapPath?: string; memoryBootstrapSha256?: string; taskId: string; modId: string; sessionId: string; generation: number; sourceDirectory: string; stagingId: string; stagingDirectory: string; createdAt: string }
 export interface Receipt { sourceRevision: number; taskId: string; commandId: string; toolCallId: string; exitCode: number | null; status: "succeeded" | "failed" | "cancelled"; logPath: string; program: string; args: string[]; pid?: number; startedAt: string; durationMs: number; outputTail: string; startupError?: string }
-export function context(): TaskContext {
-  const raw = process.env.GEN_MOD_TASK_CONTEXT;
-  if (!raw) { throw new Error("此连接没有原生任务上下文，不能执行命令或交付"); }
-  return JSON.parse(raw) as TaskContext;
-}
-// 仅 pi 主进程持有脱敏集合，命令后代不能继承这些密钥。
-const secrets = [...new Set<string>(JSON.parse(process.env.GEN_MOD_REDACTION_KEYS ?? "[]") as string[])]
-  .filter(Boolean).sort((left, right) => right.length - left.length);
-const redact = (value: string): string => secrets.reduce((text, key) => text.replaceAll(key, "[redacted]"), value);
-/** stderr 独立于工具回执，协调失败时原生仍可保存命令已执行的证据。 */
-export function runtimeDiagnostic(event: string, fields: Record<string, unknown>): void {
-  const task = context();
-  const raw = JSON.stringify({ type: "command_diagnostic", event, timestamp: new Date().toISOString(), taskId: task.taskId, ...fields });
-  process.stderr.write(`GEN_MOD_DIAGNOSTIC ${redact(raw)}\n`);
-}
 export async function contained(root: string, path: string): Promise<string> {
   const base = await realpath(root);
   const actual = await realpath(path);
@@ -89,13 +75,13 @@ export async function runCommand(toolCallId: string, program: string, args: stri
     stream.setEncoding("utf8");
     stream.on("data", (chunk: string) => {
       const combined = tail + chunk;
-      const keep = Math.max(0, ...secrets.map(key => key.length - 1));
+      const keep = Math.max(0, ...redactionKeys.map(key => key.length - 1));
       let boundary = Math.max(0, combined.length - keep);
       // 不切开任一 Key；重叠密钥导致边界前移时重新检查。
       let previousBoundary: number;
       do {
         previousBoundary = boundary;
-        for (const key of secrets) {
+        for (const key of redactionKeys) {
           const crossing = combined.lastIndexOf(key, boundary);
           if (crossing >= 0 && crossing + key.length > boundary) { boundary = crossing; }
         }

@@ -119,9 +119,6 @@ pub fn restricted_for_task(
     app: &tauri::AppHandle,
     task: &crate::pi::tasks::TaskContext,
 ) -> Result<BTreeSet<String>, String> {
-    if task.context_snapshot_id.is_none() {
-        return Ok(Default::default());
-    }
     Ok(crate::project_context::repository::snapshot_for_task_on(
         &crate::storage::database::connect(app)?,
         &task.mod_id,

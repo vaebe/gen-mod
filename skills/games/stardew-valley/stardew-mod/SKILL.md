@@ -36,3 +36,5 @@ description: 当在 GenMod 为星露谷物语制作、续改或交付 Content Pa
 安装目标选择游戏的 **Mods 目录**；交付 target 为 `<ModFolder>/manifest.json` 等相对路径，不再添加一层 Mods。游戏和 SMAPI/Content Patcher 由玩家准备，GenMod 不自动下载、安装或打包这些前置与游戏程序集。
 
 依赖不足时保留源码，明确缺项；不要伪造 DLL、构建回执或游戏验收。运行时技能只读，需求和环境事实写入项目记忆，复用知识按通用协议写入长期记忆。
+
+交付时通过 `prepare_delivery` 的 `summary` 参数提供本轮实际交付变化的简短摘要。摘要缺失或为空时先补充后重试，不把编译成功或玩家尚未验证的效果当成改动摘要。

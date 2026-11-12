@@ -6,7 +6,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/u
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { nativeCall } from '@/services/native'
+import { skillsService } from '@/features/skills/service'
 import { useLongTermMemory } from './useLongTermMemory'
 
 const props = defineProps<{ memoryId?: string }>()
@@ -23,7 +23,7 @@ watch(() => props.memoryId, (id) => {
 onMounted(async () => {
   void refresh(1)
   try {
-    skills.value = await nativeCall<SkillView[]>('list_skills')
+    skills.value = await skillsService.list()
   }
   catch (cause) { skillError.value = (cause as Error).message }
 })
@@ -86,9 +86,6 @@ onMounted(async () => {
                 <SelectItem value="active">
                   已启用
                 </SelectItem>
-                <SelectItem value="candidate">
-                  历史候选
-                </SelectItem>
                 <SelectItem value="archived">
                   已停用
                 </SelectItem>
@@ -131,7 +128,7 @@ onMounted(async () => {
               {{ note.content }}
             </span>
             <span class="text-xs font-normal text-muted-foreground">
-              {{ note.status === 'archived' ? '已停用' : note.status === 'candidate' ? '历史候选' : note.allowReuse ? '已启用' : '未启用复用' }} · {{ note.versionScope === 'exact' ? note.gameVersion : note.versionScope === 'unknown' ? '版本待核对' : '不依赖版本' }}
+              {{ note.status === 'archived' ? '已停用' : note.allowReuse ? '已启用' : '未启用复用' }} · {{ note.versionScope === 'exact' ? note.gameVersion : note.versionScope === 'unknown' ? '版本待核对' : '不依赖版本' }}
             </span>
           </span>
         </Button>

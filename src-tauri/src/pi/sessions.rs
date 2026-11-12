@@ -10,10 +10,7 @@ pub fn rename_mod_session(app: tauri::AppHandle, mod_id: String, session_id: Str
         use tauri::Manager;
         let state = app.state::<mods::StorageState>();
         let _lock = state.0.lock().map_err(|_| "项目存储锁异常")?;
-        crate::storage::repository::update(&app,&mod_id,|project| {
-            let session=project.sessions.iter_mut().find(|s|s.session_id==session_id).ok_or("会话不属于当前项目")?;
-            session.name=name.into(); project.updated_at=mods::now()?; Ok(())
-        })
+        super::session_repository::edit(&app,&mod_id,super::session_repository::SessionChange::Rename {session_id,name:name.into()})
     })()
 }
 
@@ -36,9 +33,10 @@ pub fn read_session_history(app: tauri::AppHandle, mod_id: String, session_id: S
     let actual = file.canonicalize().map_err(|e| e.to_string())?;
     if !actual.starts_with(&sessions) { return Err("会话文件位于当前项目之外".into()); }
     let resources = super::runtime::resources(&app)?;
-    let helper = resources.join("pi-portable-v1.5.0/helpers/read-session.mjs");
+    let runtime = super::runtime::paths(&resources)?;
+    let helper = runtime.history;
     if !helper.is_file() { return Err("历史读取资源尚未准备，请执行 pnpm prepare:runtime".into()); }
-    let mut command = Command::new(resources.join("node-v26.12.1-win-x64/node.exe"));
+    let mut command = Command::new(runtime.node);
     command.arg(helper).arg(actual).arg(sessions).arg(directory.join("source"))
         .env_clear().env("PI_OFFLINE", "1").env("PI_TELEMETRY", "0")
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -53,5 +51,5 @@ pub fn read_session_history(app: tauri::AppHandle, mod_id: String, session_id: S
 #[tauri::command]
 pub fn list_mod_tasks(app: tauri::AppHandle, mod_id: String) -> Result<Vec<super::tasks::TaskRecord>, String> {
     mods::read_project(&app, &mod_id)?;
-    crate::storage::repository::tasks(&app, &mod_id)
+    crate::pi::tasks::tasks(&app, &mod_id)
 }

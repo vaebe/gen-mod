@@ -3,7 +3,7 @@ use rusqlite::Connection;
 fn fixture() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    for sql in [include_str!("../storage/migrations/001_initial.sql"),include_str!("../storage/migrations/002_session_model.sql"),include_str!("../storage/migrations/003_project_context.sql"),include_str!("../storage/migrations/006_knowledge.sql"),include_str!("../storage/migrations/009_memory.sql"),include_str!("../storage/migrations/010_project_lifecycle.sql"),include_str!("../storage/migrations/007_inspection.sql")] {db.execute_batch(sql).unwrap();}
+    db.execute_batch(include_str!("../storage/schema.sql")).unwrap();
     db.execute_batch("INSERT INTO projects(mod_id,payload) VALUES('a','{}'),('b','{}');").unwrap();
     db
 }

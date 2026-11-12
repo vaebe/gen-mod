@@ -1,4 +1,5 @@
 mod io;
+pub mod manager;
 #[cfg(test)]
 mod tests;
 
@@ -6,7 +7,7 @@ use std::{io::Write, path::{Path, PathBuf}};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{Emitter, Manager};
-use crate::{changes, pi::workspace::{NativeOperation, Workspaces}, storage::{mods, paths, repository}};
+use crate::{changes, pi::workspace::{NativeOperation, Workspaces}, storage::{mods, paths}};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -20,7 +21,6 @@ pub struct SourceMutationResult { operation_id: String, source_revision: u64, it
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SourceOperation {
-    #[serde(default)]
     directory: bool,
     operation_id: String,
     source_relative_path: Option<String>,
@@ -74,7 +74,7 @@ fn project_input(app: &tauri::AppHandle, mod_id: &str) -> Result<(PathBuf, Vec<S
     let _guard = storage.0.lock().map_err(|_| "项目存储锁异常")?;
     crate::project_lifecycle::repository::ensure_writable(app,mod_id)?;
     let project = mods::read_project(app, mod_id)?;
-    if repository::has_active_tasks(app, mod_id)? { return Err("当前项目有活动 AI 任务，请结束后重试".into()); }
+    if crate::pi::tasks::has_active_tasks(app, mod_id)? { return Err("当前项目有活动 AI 任务，请结束后重试".into()); }
     let root = paths::project_dir(app, mod_id)?.join("source");
     checked_path(&root, "", &[])?;
     let mut exclusions = vec![".delivery".into(), ".git".into()];
@@ -84,7 +84,7 @@ fn project_input(app: &tauri::AppHandle, mod_id: &str) -> Result<(PathBuf, Vec<S
 }
 
 fn journal(app: &tauri::AppHandle, mod_id: &str, item_id: &str, kind: &str, status: &str, operation: &SourceOperation) -> Result<(), String> {
-    repository::file_operation(app, item_id, mod_id, kind, status, &serde_json::to_value(operation).map_err(|e| e.to_string())?)
+    crate::application::file_operations::file_operation(app, item_id, mod_id, kind, status, &serde_json::to_value(operation).map_err(|e| e.to_string())?)
 }
 
 fn staging_path(project: &Path, item_id: &str, operation: &SourceOperation) -> Result<PathBuf, String> {
@@ -155,10 +155,10 @@ pub async fn import_source_files(app: tauri::AppHandle, mod_id: String, target_d
 fn import(app: &tauri::AppHandle, mod_id: &str, directory: &str, items: Vec<SourceImportItem>) -> Result<SourceMutationResult, String> {
     let reservation = app.state::<Workspaces>().try_reserve_native(mod_id, NativeOperation::SourceChange)?;
     let (root, exclusions) = project_input(app, mod_id)?;
-    import_reserved(app,mod_id,directory,items,root,exclusions,reservation,None)
+    import_reserved(app,mod_id,directory,items,root,exclusions,reservation)
 }
 
-fn import_reserved(app:&tauri::AppHandle,mod_id:&str,directory:&str,items:Vec<SourceImportItem>,root:PathBuf,exclusions:Vec<String>,reservation:crate::pi::workspace::NativeReservation,expected_hash:Option<&str>)->Result<SourceMutationResult,String> {
+fn import_reserved(app:&tauri::AppHandle,mod_id:&str,directory:&str,items:Vec<SourceImportItem>,root:PathBuf,exclusions:Vec<String>,reservation:crate::pi::workspace::NativeReservation)->Result<SourceMutationResult,String> {
     let before = changes::source_fingerprint(&root, &exclusions)?;
     reservation.observe_fingerprint(before.clone())?;
     let operation_id = uuid::Uuid::new_v4().to_string();
@@ -188,7 +188,6 @@ fn import_reserved(app:&tauri::AppHandle,mod_id:&str,directory:&str,items:Vec<So
             let staged = staging_path(project, &item_id, &operation)?;
             create_staging_parents(project, &operation_id)?;
             operation.result_hash = Some(io::copy_to_staging(original, &staged)?);
-            if expected_hash.is_some_and(|hash|operation.result_hash.as_deref()!=Some(hash)) {return Err("旧素材指纹不一致，未导入源码".into());}
             operation.phase = "ready".into();
             journal(app, mod_id, &item_id, "source_import", "pending", &operation)?;
             checked_path(&root, &operation.target_relative_path, &exclusions)?;
@@ -207,33 +206,6 @@ fn import_reserved(app:&tauri::AppHandle,mod_id:&str,directory:&str,items:Vec<So
         results.push(result);
     }
     finish(app, mod_id, &root, &exclusions, &reservation, operation_id, before, results)
-}
-
-pub fn restore_legacy(app:&tauri::AppHandle,mod_id:&str,path:&Path,name:&str,hash:&str)->Result<serde_json::Value,String>{
-    let reservation=app.state::<Workspaces>().try_reserve_native(mod_id,NativeOperation::SourceChange)?;
-    let (root,exclusions)=project_input(app,mod_id)?;
-    io::validate_plain_file(path)?;
-    if changes::file_hash(path)?!=hash{return Err("旧素材指纹不一致，原文件保留".into());}
-    for relative in ["assets","assets/legacy"] {
-        let directory=checked_path(&root,relative,&exclusions)?;
-        match std::fs::create_dir(&directory){Ok(())=>{},Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists && directory.is_dir()=>paths::reject_redirect(&directory)?,Err(e)=>return Err(e.to_string())}
-    }
-    let (relative,target)=target_path(&root,"assets/legacy",name,&exclusions)?;
-    match legacy_target_status(&target,hash)? {
-        "alreadyPresent"=>return Ok(json!({"sourcePath":relative,"status":"alreadyPresent"})),
-        "conflict"=>return Ok(json!({"sourcePath":relative,"status":"conflict"})),
-        _=>{},
-    }
-    let result=import_reserved(app,mod_id,"assets/legacy",vec![SourceImportItem{source_path:path.to_string_lossy().into_owned(),target_name:name.into()}],root,exclusions,reservation,Some(hash))?;
-    let item=result.items.first().ok_or("素材恢复没有文件结果")?;
-    if item.status!="imported" {return Err(item.message.clone().unwrap_or_else(||"素材未恢复".into()));}
-    Ok(json!({"sourcePath":relative,"status":"restored","sourceRevision":result.source_revision}))
-}
-
-fn legacy_target_status(target:&Path,hash:&str)->Result<&'static str,String>{
-    match std::fs::symlink_metadata(target){Ok(_)=>{},Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Ok("missing"),Err(e)=>return Err(e.to_string())}
-    io::validate_plain_file(target)?;
-    Ok(if changes::file_hash(target)?==hash{"alreadyPresent"}else{"conflict"})
 }
 
 #[tauri::command]
@@ -355,5 +327,5 @@ pub fn reconcile(app: &tauri::AppHandle, mod_id: &str, item_id: &str, kind: &str
     let project = mods::read_project(app, mod_id)?;
     let exclusions: Vec<_> = crate::skills::registry::resolve_for_game(app, &project.game_id)?.into_iter().flat_map(|view| view.definition.exclude_paths).collect();
     let status = recover_operation(&paths::project_dir(app, mod_id)?, item_id, kind, &operation, &exclusions).unwrap_or("requires_review");
-    repository::file_operation(app, item_id, mod_id, kind, status, payload)
+    crate::application::file_operations::file_operation(app, item_id, mod_id, kind, status, payload)
 }

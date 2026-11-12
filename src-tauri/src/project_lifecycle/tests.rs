@@ -4,13 +4,11 @@ use rusqlite::Connection;
 pub(super) fn database() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    for sql in [include_str!("../storage/migrations/001_initial.sql"),include_str!("../storage/migrations/002_session_model.sql"),include_str!("../storage/migrations/003_project_context.sql"),include_str!("../storage/migrations/004_delivery_metadata.sql"),include_str!("../storage/migrations/005_verification.sql"),include_str!("../storage/migrations/006_knowledge.sql"),include_str!("../storage/migrations/007_inspection.sql"),include_str!("../storage/migrations/008_assets.sql"),include_str!("../storage/migrations/009_memory.sql"),include_str!("../storage/migrations/010_project_lifecycle.sql")] {
-        db.execute_batch(sql).unwrap();
-    }
+    db.execute_batch(include_str!("../storage/schema.sql")).unwrap();
     db
 }
 fn seed(db: &Connection, id: &str) {
-    let payload = serde_json::json!({"modId":id,"name":"项目","gameId":"duckov","gameSkillName":"duckov-mod","draftRequirement":"需求","updatedAt":"now","developmentStatus":"draft","versions":[],"installations":[],"installedTargets":[]});
+    let payload = serde_json::json!({"modId":id,"name":"项目","gameId":"duckov","gameSkillName":"duckov-mod","revision":0,"archived":false,"description":"","draftRequirement":"需求","updatedAt":"now","developmentStatus":"draft","versions":[],"installations":[],"installedTargets":[]});
     db.execute("INSERT INTO projects(mod_id,payload,revision) VALUES(?1,?2,0)",rusqlite::params![id,payload.to_string()]).unwrap();
 }
 
@@ -34,26 +32,23 @@ fn permanent_delete_preserves_global_memory_other_project_and_external_files() {
     let (mut db,root,id,other)=fixture();
     let external=tempfile::tempdir().unwrap();std::fs::write(external.path().join("installed.bin"),b"installed").unwrap();
     let note=serde_json::json!({"content":"跨项目方法"});
-    db.execute("INSERT INTO knowledge_notes(note_id,origin_mod_id,game_id,revision,status,allow_reuse,user_edited,memory_key,payload) VALUES('n',?1,'duckov',1,'active',1,1,'manual:n',?2)",rusqlite::params![id,note.to_string()]).unwrap();
+    db.execute("INSERT INTO knowledge_notes(note_id,origin_mod_id,game_id,revision,status,allow_reuse,user_edited,memory_key,payload,created_at,updated_at) VALUES('n',?1,'duckov',1,'active',1,1,'manual:n',?2,'now','now')",rusqlite::params![id,note.to_string()]).unwrap();
     db.execute("INSERT INTO memory_content_links VALUES('duckov','hash','n')",[]).unwrap();
-    db.execute("INSERT INTO sessions(mod_id,session_id,payload) VALUES(?1,'s','{\"sessionId\":\"s\",\"sessionFile\":\"\",\"skills\":[],\"readOnly\":false}')",[&id]).unwrap();
+    db.execute("INSERT INTO sessions(mod_id,session_id,payload) VALUES(?1,'s','{\"sessionId\":\"s\",\"sessionFile\":\"\",\"skills\":[],\"readOnly\":false,\"name\":\"\"}')",[&id]).unwrap();
     db.execute("INSERT INTO tasks VALUES('t',?1,'s','finished','now','now','{}')",[&id]).unwrap();
     db.execute("INSERT INTO task_memory_uses VALUES('t',?1,'n',1,'old copy')",[&id]).unwrap();
-    for table in ["project_contexts","context_snapshots","context_proposals","delivery_metadata","inspection_reports","project_assets"] {
+    for table in ["project_contexts","context_snapshots","delivery_metadata","inspection_reports"] {
         let sql=match table {
             "project_contexts"=>"INSERT INTO project_contexts VALUES(?1,1,'{}')",
             "context_snapshots"=>"INSERT INTO context_snapshots VALUES('snap',?1,'t','{}')",
-            "context_proposals"=>"INSERT INTO context_proposals VALUES('proposal',?1,'pending','{}')",
             "delivery_metadata"=>"INSERT INTO delivery_metadata VALUES(?1,'v','t','{}')",
-            "inspection_reports"=>"INSERT INTO inspection_reports VALUES('report',?1,'path','{}')",
-            _=>"INSERT INTO project_assets VALUES('asset',?1,'{}')"};db.execute(sql,[&id]).unwrap();
+            _=>"INSERT INTO inspection_reports VALUES('report',?1,'path','{}')"};db.execute(sql,[&id]).unwrap();
     }
     db.execute("INSERT INTO feedback_drafts VALUES('f',?1,'v',1,'confirmed','{}')",[&id]).unwrap();
     db.execute("INSERT INTO verification_records VALUES('vr','f',?1,'v','now','{}',NULL)",[&id]).unwrap();
     db.execute("INSERT INTO runtime_logs VALUES(1,?1,'s','t','now','{}')",[&id]).unwrap();
     db.execute("INSERT INTO steering_inputs VALUES('input',?1,'s','t',1,'now','confirmed','{}')",[&id]).unwrap();
     db.execute("INSERT INTO session_stats VALUES(?1,'s','now','{}')",[&id]).unwrap();
-    db.execute("INSERT INTO legacy_imports VALUES(?1,NULL,'now')",[&id]).unwrap();
     let removal=super::recovery::begin_delete(&mut db,root.path(),&id,0).unwrap();
     assert!(!root.path().join(&id).exists());
     let result=super::recovery::finish_delete(&db,root.path(),&removal);
@@ -62,7 +57,7 @@ fn permanent_delete_preserves_global_memory_other_project_and_external_files() {
     assert_eq!(std::fs::read(external.path().join("installed.bin")).unwrap(),b"installed");
     assert_eq!(db.query_row::<i64,_,_>("SELECT COUNT(*) FROM knowledge_notes",[],|r|r.get(0)).unwrap(),1);
     assert_eq!(db.query_row::<i64,_,_>("SELECT COUNT(*) FROM memory_content_links",[],|r|r.get(0)).unwrap(),1);
-    for table in ["task_memory_uses","project_contexts","context_snapshots","context_proposals","delivery_metadata","inspection_reports","project_assets","verification_records","feedback_drafts","runtime_logs","steering_inputs","session_stats","tasks","sessions","legacy_imports"] {
+    for table in ["task_memory_uses","project_contexts","context_snapshots","delivery_metadata","inspection_reports","verification_records","feedback_drafts","runtime_logs","steering_inputs","session_stats","tasks","sessions"] {
         assert_eq!(db.query_row::<i64,_,_>(&format!("SELECT COUNT(*) FROM {table} WHERE mod_id=?1"),[&id],|r|r.get(0)).unwrap(),0,"{table}");
     }
     assert!(!db.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
@@ -124,7 +119,7 @@ fn archive_restore_cas_and_read_have_no_side_effects() {
     assert!(archived.archived);
     assert_eq!(archived.revision,1);
     assert!(ensure_writable_on(&db,"p").is_err());
-    assert!(crate::storage::repository::save_on(&db,&archived,false).is_err());
+    assert!(crate::projects::repository::edit_on(&mut db,"p",archived.revision,crate::projects::repository::DetailChange::Name("blocked".into())).is_err());
     let raw: String = db.query_row("SELECT payload FROM projects WHERE mod_id='p'",[],|r|r.get(0)).unwrap();
     for _ in 0..3 { assert!(crate::storage::repository::read_on(&db,"p").unwrap().archived); }
     assert_eq!(raw,db.query_row::<String,_,_>("SELECT payload FROM projects WHERE mod_id='p'",[],|r|r.get(0)).unwrap());
@@ -137,12 +132,12 @@ fn archive_restore_cas_and_read_have_no_side_effects() {
 }
 #[test]
 fn unresolved_removals_block_writes_until_verified_recovery() {
-    let db=database(); seed(&db,"p");
+    let mut db=database(); seed(&db,"p");
     for status in ["pending","requires_review","interrupted"] {
         db.execute("INSERT OR REPLACE INTO file_operations VALUES('op','p','project_delete',?1,'{}')",[status]).unwrap();
         assert_eq!(ensure_writable_on(&db,"p").is_ok(),status=="interrupted");
         let project=crate::storage::repository::read_on(&db,"p").unwrap();
-        assert_eq!(crate::storage::repository::save_on(&db,&project,false).is_ok(),status=="interrupted");
+        assert_eq!(crate::projects::repository::edit_on(&mut db,"p",project.revision,crate::projects::repository::DetailChange::Name("name".into())).is_ok(),status=="interrupted");
     }
     db.execute("INSERT INTO project_removals VALUES('p','op','now')",[]).unwrap();
     assert!(ensure_writable_on(&db,"p").is_err());

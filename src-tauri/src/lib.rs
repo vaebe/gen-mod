@@ -1,8 +1,10 @@
+mod application;
 mod cloud;
 mod games;
 mod local_resources;
 mod project_context;
 mod project_lifecycle;
+mod projects;
 mod storage;
 mod pi;
 mod config;
@@ -24,7 +26,7 @@ pub fn run() {
         .manage(pi::bridge::PiState::default())
         .manage(pi::workspace::Workspaces::default())
         .manage(install::installer::InstallState::default())
-        .setup(|app| { storage::database::initialize(app.handle()).map_err(std::io::Error::other)?; Ok(()) })
+        .setup(|app| { application::startup::initialize(app.handle()).map_err(std::io::Error::other)?; Ok(()) })
         .invoke_handler({ let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             games::list_games, games::read_game_cover, games::read_game_icon,
             cloud::auth::cloud_register,cloud::auth::cloud_login,cloud::auth::cloud_logout,cloud::auth::cloud_me,cloud::auth::cloud_initialize,
@@ -34,20 +36,22 @@ pub fn run() {
             knowledge::save_long_term_memory_entry, knowledge::set_long_term_memory_status,
             source_files::pick_source_import_files, source_files::import_source_files,
             source_files::move_source_file, source_files::create_source_directory,
-            assets::list_legacy_assets,assets::restore_legacy_asset,
+            source_files::manager::transfer_source_entries, source_files::manager::create_source_file,
+            source_files::manager::save_source_text, source_files::manager::recycle_source_entries,
+            source_files::manager::source_entry_action,
             game_inspection::inspect_supported_game, game_inspection::list_inspections, game_inspection::apply_inspection,
             verification::list_verification, verification::edit_feedback_draft, verification::confirm_feedback_draft, verification::reject_feedback_draft,
             artifacts::delivery_metadata::get_delivery_metadata,
             project_context::get_project_context,
             storage::mods::create_mod, storage::mods::list_mods,
-            storage::mods::get_mod, storage::mods::rename_mod,
+            storage::mods::get_mod, storage::mods::rename_mod, storage::mods::update_mod_description,
             storage::mods::save_mod_draft,
-            pi::bridge::save_session_thinking, pi::bridge::select_session_model, storage::repository::read_session_metadata, storage::repository::list_migration_errors,
-            storage::repository::list_recovery_issues,
+            pi::bridge::save_session_thinking, pi::bridge::select_session_model, crate::pi::session_repository::read_session_metadata,
+            crate::application::file_operations::list_recovery_issues,
             pi::bridge::create_mod_session, pi::bridge::connect_pi, pi::bridge::send_pi_command,
             pi::bridge::disconnect_pi, pi::bridge::start_mod_task,
             pi::bridge::reserve_pi_subscription, pi::bridge::read_pi_runtime, pi::submissions::read_submission_result,
-            pi::bridge::steer_mod_task, storage::repository::list_steering_inputs,
+            pi::bridge::steer_mod_task, crate::pi::session_repository::list_steering_inputs,
             config::get_configuration, config::save_configuration, config::open_configuration_directory,
             changes::list_task_operations, changes::list_task_changes, changes::get_task_file_diff,
             files::reveal_source_file, files::open_message_link,
@@ -63,7 +67,7 @@ pub fn run() {
             install::installer::preview_install, install::installer::install_version,
             files::pick_directory, files::open_mod_directory,
             files::export_version, files::open_task_logs,
-            artifacts::registry::delete_version];
+            artifacts::registry::delete_version, artifacts::registry::get_install_hint];
             handler
         })
         .build(tauri::generate_context!())
@@ -78,5 +82,3 @@ mod verification;
 mod knowledge;
 
 mod game_inspection;
-
-mod assets;

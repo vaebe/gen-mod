@@ -8,7 +8,7 @@ fn note(id: &str, status: &str, game: &str, version: &str) -> KnowledgeNote {
         status: status.into(),
         allow_reuse: true,
         origin_mod_id: None, origin_project_name: None, user_edited: false,
-        memory_key: format!("fixture:{id}"), created_at: None, updated_at: None,
+        memory_key: format!("fixture:{id}"), created_at: "now".into(), updated_at: "now".into(),
         input: KnowledgeInput {
             version_scope: "exact".into(),
             game_version: Some(version.into()),
@@ -22,12 +22,10 @@ fn note(id: &str, status: &str, game: &str, version: &str) -> KnowledgeNote {
 }
 #[test]
 fn excludes_unaccepted_wrong_version_and_private_notes() {
-    let db = legacy_database();
-    migrate_memory_on(&db).unwrap();
+    let db = database();
     for item in [
         note("accepted", "active", "duckov", "a"),
         note("old", "active", "duckov", "old"),
-        note("candidate", "candidate", "duckov", "a"),
         note("archived", "archived", "duckov", "a"),
         note("other", "active", "other", "a"),
     ] {
@@ -58,56 +56,21 @@ fn excludes_unaccepted_wrong_version_and_private_notes() {
     );
 }
 
-fn legacy_database() -> Connection {
+fn database() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    for sql in [include_str!("../storage/migrations/001_initial.sql"), include_str!("../storage/migrations/002_session_model.sql"),
-        include_str!("../storage/migrations/003_project_context.sql"), include_str!("../storage/migrations/004_delivery_metadata.sql"),
-        include_str!("../storage/migrations/005_verification.sql"), include_str!("../storage/migrations/006_knowledge.sql"),
-        include_str!("../storage/migrations/007_inspection.sql"), include_str!("../storage/migrations/008_assets.sql"),include_str!("../storage/migrations/010_project_lifecycle.sql")] {
-        db.execute_batch(sql).unwrap();
-    }
+    db.execute_batch(include_str!("../storage/schema.sql")).unwrap();
     db.execute("INSERT INTO projects(mod_id,payload,revision) VALUES('p','{}',0)", []).unwrap();
     db
 }
 
 #[test]
-fn migration_keeps_legacy_user_content_and_independent_lifetime() {
-    let mut db = legacy_database();
-    for (id, status, reuse) in [("accepted", "active", true), ("candidate", "candidate", false), ("archived", "archived", true), ("private", "active", false)] {
-        let payload = serde_json::json!({"noteId":id,"revision":7,"gameId":"duckov","versionScope":"independent",
-            "title":"用户改过的标题","content":"用户改过的正文","route":"legacy","gameVersion":null,
-            "evidenceKind":"reference","sourceRefs":[{"kind":"reference","id":"ref"}],"status":status,"allowReuse":reuse});
-        db.execute("INSERT INTO knowledge_notes VALUES(?1,'p','duckov',7,?2,?3)", rusqlite::params![id,status,payload.to_string()]).unwrap();
-    }
-    let tx = db.transaction().unwrap();
-    migrate_memory_on(&tx).unwrap();
-    tx.commit().unwrap();
-    let note = read_on(&db, "accepted").unwrap();
-    assert!(note.user_edited);
-    assert_eq!(note.revision, 7);
-    assert_eq!(note.input.content, "用户改过的正文");
-    assert_eq!(read_on(&db, "candidate").unwrap().status, "candidate");
-    assert_eq!(read_on(&db, "archived").unwrap().status, "archived");
-    assert!(!read_on(&db, "private").unwrap().allow_reuse);
-    db.execute("DELETE FROM projects WHERE mod_id='p'", []).unwrap();
-    assert_eq!(read_on(&db, "accepted").unwrap().input.title, "用户改过的标题");
-    let violations: i64 = db.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get(0)).unwrap();
-    assert_eq!(violations, 0);
-    let links: i64 = db.query_row("SELECT COUNT(*) FROM memory_content_links", [], |row| row.get(0)).unwrap();
-    assert_eq!(links, 4);
-}
-
-#[test]
 fn user_edit_and_delete_use_cas_and_keep_body_protection() {
-    let mut db = legacy_database();
-    let payload = serde_json::json!({"noteId":"n","revision":7,"gameId":"duckov","versionScope":"independent",
-        "title":"标题","content":"原正文","route":"legacy","gameVersion":null,
-        "evidenceKind":"reference","sourceRefs":[],"status":"active","allowReuse":true});
-    db.execute("INSERT INTO knowledge_notes VALUES('n','p','duckov',7,'active',?1)", [payload.to_string()]).unwrap();
-    let tx = db.transaction().unwrap();
-    migrate_memory_on(&tx).unwrap();
-    tx.commit().unwrap();
+    let mut db = database();
+    let mut original = note("n", "active", "duckov", "a");
+    original.revision = 7;
+    original.input.content = "原正文".into();
+    insert_global_on(&db, &original).unwrap();
     let edited = edit_on(&mut db, "n", 7, "新标题", "新正文").unwrap();
     assert_eq!(edited.revision, 8);
     assert!(edited.user_edited);
@@ -124,12 +87,11 @@ fn user_edit_and_delete_use_cas_and_keep_body_protection() {
 }
 
 fn running_fixture() -> (Connection, crate::pi::tasks::TaskContext) {
-    let db = legacy_database();
-    migrate_memory_on(&db).unwrap();
+    let db = database();
     db.execute("INSERT INTO sessions(mod_id,session_id,payload,generation) VALUES('p','s','{}',1)", []).unwrap();
     db.execute("INSERT INTO tasks(task_id,mod_id,session_id,status,created_at,payload) VALUES('task','p','s','running','now','{}')", []).unwrap();
     (db, crate::pi::tasks::TaskContext { task_id: "task".into(), mod_id: "p".into(), session_id: "s".into(), generation: 1,
-        source_directory: String::new(), staging_id: "staging".into(), staging_directory: String::new(), created_at: "now".into(), context_snapshot_id: None, memory_bootstrap_path:None,memory_bootstrap_sha256:None })
+        source_directory: String::new(), staging_id: "staging".into(), staging_directory: String::new(), created_at: "now".into(), context_snapshot_id: "snapshot".into(), memory_bootstrap_path:None,memory_bootstrap_sha256:None })
 }
 
 fn automatic_input() -> SaveLongTermMemoryInput {
@@ -223,7 +185,8 @@ fn message_and_command_evidence_reject_forgery_and_other_projects() {
     assert!(super::evidence::validate_message(&[entry.clone()], &task, &source).is_err());
     source.session_id = Some("other-session".into());
     assert!(super::evidence::validate_message(&[entry], &task, &source).is_err());
-    let record = serde_json::json!({"context":task,"status":"running","commands":[{"taskId":"task","commandId":"actual-receipt","toolCallId":"tool","exitCode":1,"status":"failed","logPath":"fixture.log"}]});
+    crate::project_context::repository::snapshot_on(&db, &task.mod_id, &task.task_id, &task.context_snapshot_id, &task.created_at).unwrap();
+    let record = serde_json::json!({"context":task,"status":"running","commands":[{"taskId":"task","commandId":"actual-receipt","toolCallId":"tool","exitCode":1,"status":"failed","logPath":"fixture.log","program":"build","args":[],"sourceRevision":0,"startedAt":"now","durationMs":0}]});
     db.execute("UPDATE tasks SET payload=?1 WHERE task_id='task'", [record.to_string()]).unwrap();
     let mut command = SourceRef { kind: "command".into(), id: "actual-receipt".into(), task_id: Some("task".into()), ..Default::default() };
     assert_eq!(super::evidence::validate_command_on(&db, &task, &command).unwrap(), None);

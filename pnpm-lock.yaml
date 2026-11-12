@@ -35,6 +35,9 @@ importers:
       markstream-vue:
         specifier: 2.0.16
         version: 2.0.16(katex@0.16.47)(vue@3.5.43(typescript@6.0.3))
+      material-icon-theme:
+        specifier: ^5.40.0
+        version: 5.40.0
       pinia:
         specifier: ^4.0.3
         version: 4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.43(typescript@6.0.3))
@@ -1566,6 +1569,9 @@ packages:
     resolution: {integrity: sha512-TQMmc3w+5AxjpL8iIiwebF73dRDF4fBIieAqGn9RGCWaEVwQ6Fb2cGe31Yns0RRIzii5goJ1Y7xbMwo1TxMplw==}
     engines: {node: '>= 20.19.0'}
 
+  chroma-js@3.3.0:
+    resolution: {integrity: sha512-afEEP0zHO4dxwrqTllKSFWs83+u+htEsmyvSe8IPjKjrfy3qmNk+vpWAdpbA2fJa14LTgkGyemC74J6v3HSUZA==}
+
   ci-info@4.4.0:
     resolution: {integrity: sha512-77PSwercCZU2Fc4sX94eF8k8Pxte6JAwL4/ICZLFjJLqegs7kCuAsqqj/70NQF6TvDpgFjkubQB2FW2ZZddvQg==}
     engines: {node: '>=8'}
@@ -2444,6 +2450,10 @@ packages:
         optional: true
       vue-i18n:
         optional: true
+
+  material-icon-theme@5.40.0:
+    resolution: {integrity: sha512-IrvgusbwtqxhUtVgUy0nToJcfN7CYVRdbBxKMfbo0vab9flVBHA5INZ9UiE5SgRj+PM6opCl5nn5TZdpm2UaxA==}
+    engines: {vscode: ^1.55.0}
 
   mdast-util-find-and-replace@3.0.3:
     resolution: {integrity: sha512-xPgpDNl0/OXHsI7TlaIs22lWnH3KlpvZdXG1ET/m/YT2Hhdkx8lJV4kLphE6l9simyM4KPDFBwas08BgEob6Jw==}
@@ -4712,6 +4722,8 @@ snapshots:
     dependencies:
       readdirp: 5.1.1
 
+  chroma-js@3.3.0: {}
+
   ci-info@4.4.0: {}
 
   class-variance-authority@0.7.1:
@@ -5586,6 +5598,10 @@ snapshots:
       vue: 3.5.43(typescript@6.0.3)
     optionalDependencies:
       katex: 0.16.47
+
+  material-icon-theme@5.40.0:
+    dependencies:
+      chroma-js: 3.3.0
 
   mdast-util-find-and-replace@3.0.3:
     dependencies:

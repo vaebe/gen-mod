@@ -32,7 +32,7 @@ pub fn delete_private_rows_on(db: &mut Connection,id: &str,operation: &str,remov
     // 跨项目 supersedes 属于损坏数据，不能通过删除其他项目来补偿。
     let cross:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM verification_records a JOIN verification_records b ON a.supersedes=b.record_id WHERE a.mod_id<>b.mod_id AND (a.mod_id=?1 OR b.mod_id=?1))",[id],|r|r.get(0)).map_err(|e|e.to_string())?;
     if cross {return Err("验收记录存在跨项目引用，未删除任何数据".into());}
-    for table in ["task_memory_uses","verification_records","feedback_drafts","delivery_metadata","context_snapshots","context_proposals","project_contexts","inspection_reports","project_assets","runtime_logs","steering_inputs","session_stats","tasks","sessions","legacy_imports"] {
+    for table in ["task_memory_uses","verification_records","feedback_drafts","delivery_metadata","context_snapshots","project_contexts","inspection_reports","runtime_logs","steering_inputs","session_stats","tasks","sessions"] {
         tx.execute(&format!("DELETE FROM {table} WHERE mod_id=?1"),[id]).map_err(|e|e.to_string())?;
     }
     tx.execute("DELETE FROM file_operations WHERE mod_id=?1 AND operation_id<>?2",params![id,operation]).map_err(|e|e.to_string())?;

@@ -17,8 +17,7 @@ pub struct ReferenceFile {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReferenceSet {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_report_id: Option<String>,
+    pub source_report_id: String,
     pub id: String,
     pub directory: String,
     pub files: Vec<ReferenceFile>,
@@ -40,7 +39,6 @@ pub struct ProjectContext {
     pub reference_sets: Vec<ReferenceSet>,
     pub prerequisites: Vec<Prerequisite>,
     pub confirmed_requirements: Vec<String>,
-    #[serde(default)]
     pub field_sources: std::collections::BTreeMap<String,Vec<ProjectMemorySourceRef>>,
 }
 impl ProjectContext {

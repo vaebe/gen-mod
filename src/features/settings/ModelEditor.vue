@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ModelForm } from '@/contracts/config'
+import type { ModelForm } from '@/features/settings/types'
 import { useId } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'

@@ -2,7 +2,8 @@ import type { ExtensionContext, ExtensionAPI, ToolDefinition } from "@earendil-w
 import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { relative, resolve, isAbsolute, sep } from "node:path";
-import { context, runtimeDiagnostic } from "./commands.js";
+import { context } from "./task-context.js";
+import { runtimeDiagnostic } from "./diagnostics.js";
 
 export interface Lease { leaseId: string; sourceRevision: number; toolCallId: string; descendantsUnconfirmed?: boolean }
 async function request(ctx: ExtensionContext, payload: Record<string, unknown>): Promise<Record<string, unknown>> {

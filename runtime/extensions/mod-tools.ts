@@ -6,7 +6,8 @@ import { registerProjectContextTools } from "./project-context.js";
 import { registerFileTools, withLease } from "./workspace.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { runCommand, context, commandEnvironment } from "./commands.js";
+import { runCommand, commandEnvironment } from "./commands.js";
+import { context } from "./task-context.js";
 import { checkDelivery } from "./delivery-check.js";
 import { prepareDelivery } from "./delivery.js";
 import { lstat } from "node:fs/promises";
@@ -52,8 +53,8 @@ export default function modTools(pi: ExtensionAPI): void {
     },
   });
   pi.registerTool({
-    name: "prepare_delivery", label: "准备交付", description: "复制当前任务文件并打包 ZIP；原生校验成功后才登记不可变版本。taskId/stagingId 由应用绑定。", executionMode: "sequential",
-    parameters: Type.Object({ files: Type.Array(Type.Object({ source: Type.String(), target: Type.String() }), { minItems: 1 }), commandIds: Type.Array(Type.String(), { minItems: 1 }), targetDirectoryHint: Type.String(), verificationCases: Type.Optional(Type.Array(verificationCaseSchema)) }),
+    name: "prepare_delivery", label: "准备交付", description: "必须提供本次实际变化的非空 summary 摘要，复制当前任务文件并打包 ZIP；原生校验成功后才登记不可变版本。taskId/stagingId 由应用绑定。", executionMode: "sequential",
+    parameters: Type.Object({ summary: Type.String({ minLength: 1, description: "本次实际交付变化的简短摘要" }), files: Type.Array(Type.Object({ source: Type.String(), target: Type.String() }), { minItems: 1 }), commandIds: Type.Array(Type.String(), { minItems: 1 }), targetDirectoryHint: Type.String(), verificationCases: Type.Optional(Type.Array(verificationCaseSchema)) }),
     async execute(id, parameters, signal, _onUpdate, ctx) {
       return withLease(ctx,id,"prepare_delivery",undefined,signal,async lease => {
       await checkDelivery(ctx, id, parameters);
